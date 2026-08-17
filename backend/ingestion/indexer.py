@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
+import numpy as np
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import config
 from applog import Timer, log_ingestion, new_trace_id
@@ -45,6 +47,7 @@ class ImportPreview:
     classification: dict = field(default_factory=dict)
     token_estimate: int = 0
     content_hash: str = ""
+    duplicate: dict | None = None
 
     def to_dict(self) -> dict:
         return {"doc_id": self.doc_id, "trace_id": self.trace_id,
@@ -56,7 +59,8 @@ class ImportPreview:
                 "token_estimate": self.token_estimate,
                 "doc_summary": self.doc_summary,
                 "coordinates": self.coordinates,
-                "classification": self.classification}
+                "classification": self.classification,
+                "duplicate": self.duplicate}
 
 
 # API 两段式导入的内存暂存区
@@ -96,22 +100,50 @@ class Indexer:
         self.db.set_progress(doc_id, chapter_id, stage, status)
 
     # ---------- Stage 0-6：预览 ----------
-    def preview(self, source: str, trace_id: str | None = None) -> ImportPreview:
+    def preview(self, source: str, trace_id: str | None = None,
+                parsed: ParsedDocument | None = None) -> ImportPreview:
+        """parsed 可由 estimate() 预传，避免批量导入时解析双跑。"""
         trace_id = trace_id or new_trace_id()
 
-        with Timer() as t:
-            parsed = parse_any(source)                     # Stage 0
+        if parsed is None:
+            with Timer() as t:
+                parsed = parse_any(source)                 # Stage 0
+            ms = t.ms
+        else:
+            ms = 0
         # doc_id = 内容哈希（必须先解析：URL 类来源需要正文）
         content_hash = _content_hash(source, parsed)
         doc_id = _doc_id_from_hash(content_hash)
         log_ingestion(trace_id, "stage_done", doc_id, stage="parse",
-                      status="done", duration_ms=t.ms)
+                      status="done", duration_ms=ms)
 
         chunks = chunk_document(parsed)                    # Stage 1
         if not chunks:
             raise ValueError(f"文档无可入库内容: {source}")
         log_ingestion(trace_id, "stage_done", doc_id, stage="chunk",
                       status="done", chunks=len(chunks))
+
+        # 查重前置（项目2）：exact 直接短路，不烧摘要/坐标/分类 API
+        duplicate: dict | None = None
+        existing = self.db.find_by_hash(content_hash)
+        if existing:
+            duplicate = {"type": "exact",
+                         "existing_doc_id": existing["doc_id"],
+                         "existing_title": existing.get("title")}
+            log_ingestion(trace_id, "duplicate", doc_id, stage="dedup",
+                          status="exact", existing=existing["doc_id"])
+            pv = ImportPreview(
+                doc_id=doc_id, trace_id=trace_id, source=str(source),
+                parsed=parsed, chunks=chunks,
+                token_estimate=sum(c.token_count for c in chunks),
+                content_hash=content_hash, duplicate=duplicate)
+            PENDING[doc_id] = pv
+            return pv
+        same_path = self.db.find_by_source_path(str(source))
+        if same_path and same_path["doc_id"] != doc_id:
+            duplicate = {"type": "new_version",
+                         "existing_doc_id": same_path["doc_id"],
+                         "existing_title": same_path.get("title")}
 
         # Stage 3 章节摘要（带断点：已 done 的章节从缓存复用）
         summaries: list[str] = []
@@ -129,26 +161,45 @@ class Indexer:
         log_ingestion(trace_id, "stage_done", doc_id, stage="summarize",
                       status="done")
 
-        # Stage 4 全书总结 + Stage 5 坐标
-        doc_summary = summarize_document(summaries, router=self.router,
-                                         trace_id=trace_id) if summaries else ""
-        coords = extract_coordinates(doc_summary or parsed.title,
-                                     router=self.router, trace_id=trace_id)
+        # Stage 4 全书总结 + Stage 5 坐标 + Stage 6 分类（均带断点缓存）
+        extras = self._load_doc_extras(doc_id)
+        if self._done(doc_id, "__doc__", "doc_summary") and extras.get("doc_summary"):
+            doc_summary = extras["doc_summary"]
+        else:
+            doc_summary = summarize_document(summaries, router=self.router,
+                                             trace_id=trace_id) if summaries else ""
+            self._cache_doc_extra(doc_id, "doc_summary", doc_summary)
+            self._mark(doc_id, "__doc__", "doc_summary")
+        if self._done(doc_id, "__doc__", "coordinates") and extras.get("coordinates"):
+            coords = extras["coordinates"]
+        else:
+            coords = extract_coordinates(doc_summary or parsed.title,
+                                         router=self.router, trace_id=trace_id)
+            self._cache_doc_extra(doc_id, "coordinates", coords)
+            self._mark(doc_id, "__doc__", "coordinates")
         log_ingestion(trace_id, "stage_done", doc_id, stage="ideology",
                       status="done")
 
-        # Stage 6 立场分类
-        cls = classify_stance(doc_summary or parsed.full_text[:2000],
-                              router=self.router, trace_id=trace_id)
+        if self._done(doc_id, "__doc__", "classified") and extras.get("classification"):
+            cls = extras["classification"]
+        else:
+            cls = classify_stance(doc_summary or parsed.full_text[:2000],
+                                  router=self.router, trace_id=trace_id)
+            self._cache_doc_extra(doc_id, "classification", cls)
+            self._mark(doc_id, "__doc__", "classified")
         log_ingestion(trace_id, "stage_done", doc_id, stage="classify",
                       status="done", stance=cls["stance"])
+
+        # 语义近重复（需要摘要，故放 Stage 4 之后）
+        if duplicate is None and doc_summary:
+            duplicate = self._semantic_duplicate(doc_id, doc_summary)
 
         pv = ImportPreview(
             doc_id=doc_id, trace_id=trace_id, source=str(source),
             parsed=parsed, chunks=chunks, chapter_summaries=summaries,
             doc_summary=doc_summary, coordinates=coords, classification=cls,
             token_estimate=sum(c.token_count for c in chunks),
-            content_hash=content_hash)
+            content_hash=content_hash, duplicate=duplicate)
         PENDING[doc_id] = pv
         return pv
 
@@ -264,11 +315,69 @@ class Indexer:
             return None
         return json.loads(p.read_text(encoding="utf-8")).get(chap_id)
 
-    # ---------- 一步式导入（CLI 用） ----------
-    def import_document(self, source: str, stance: str | None = None) -> dict:
-        pv = self.preview(source)
-        final = stance or pv.classification["stance"]
+    # ---------- 文档级阶段缓存（坐标/分类断点恢复，项目3） ----------
+    def _cache_doc_extra(self, doc_id: str, key: str, value) -> None:
+        p = self._summary_cache_path(doc_id)
+        data = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+        data[f"__{key}__"] = value
+        p.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+    def _load_doc_extras(self, doc_id: str) -> dict:
+        p = self._summary_cache_path(doc_id)
+        if not p.exists():
+            return {}
+        data = json.loads(p.read_text(encoding="utf-8"))
+        return {k.strip("_"): v for k, v in data.items() if k.startswith("__")}
+
+    # ---------- 语义近重复（全书摘要向量余弦，项目2） ----------
+    def _semantic_duplicate(self, doc_id: str, doc_summary: str) -> dict | None:
+        docs = [d for d in self.db.list_documents()
+                if d.get("summary") and d["doc_id"] != doc_id]
+        if not docs:
+            return None
+        emb = get_embedder()
+        vecs = emb.embed_batch([doc_summary] + [d["summary"] for d in docs])
+        q = np.asarray(vecs[0], dtype=np.float32)
+        for d, v in zip(docs, vecs[1:]):
+            v = np.asarray(v, dtype=np.float32)
+            sim = float(q @ v / (np.linalg.norm(q) * np.linalg.norm(v) + 1e-9))
+            if sim > 0.92:
+                return {"type": "semantic", "existing_doc_id": d["doc_id"],
+                        "existing_title": d.get("title"),
+                        "similarity": round(sim, 3)}
+        return None
+
+    # ---------- 一步式导入（CLI/批量用） ----------
+    def import_document(self, source: str, stance: str | None = None,
+                        on_duplicate: str = "skip",
+                        parsed: ParsedDocument | None = None) -> dict:
+        """on_duplicate: skip=静默跳过 / replace=删旧入新 / keep-both=两版共存。"""
+        pv = self.preview(source, parsed=parsed)
+        dup = pv.duplicate
+        if dup:
+            if on_duplicate == "replace":
+                self.delete_document(dup["existing_doc_id"])
+                if dup["type"] == "exact":
+                    # exact 预览跳过了摘要/坐标/分类，删旧后补跑完整分析
+                    pv = self.preview(source, parsed=parsed)
+            elif dup["type"] == "exact":
+                return {"doc_id": pv.doc_id, "skipped": "exact_duplicate",
+                        "existing": dup["existing_doc_id"]}
+            elif dup["type"] == "new_version" and on_duplicate == "skip":
+                return {"doc_id": pv.doc_id, "skipped": "new_version_detected",
+                        "existing": dup["existing_doc_id"]}
+            # semantic 只提示不阻断；keep-both 照常入库
+        final = stance or pv.classification.get("stance") or "unknown"
         return self.confirm(pv, final)
+
+    # ---------- 批量预估（解析+切块，无 LLM 消耗） ----------
+    def estimate(self, source: str) -> dict:
+        parsed = parse_any(source)
+        chunks = chunk_document(parsed)
+        return {"source": str(source), "title": parsed.title,
+                "chunks": len(chunks),
+                "token_estimate": sum(c.token_count for c in chunks),
+                "parsed": parsed}
 
     # ---------- 删除（五源级联） ----------
     def delete_document(self, doc_id: str) -> dict:

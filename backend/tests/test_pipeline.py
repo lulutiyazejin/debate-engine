@@ -86,3 +86,32 @@ class TestPipeline:
         pv1 = idx.preview(str(src))
         pv2 = idx.preview(str(src))
         assert pv1.doc_id == pv2.doc_id
+
+
+class TestDedup:
+    """项目2：导入查重与版本更新。"""
+
+    def test_exact_duplicate_skipped(self, kb, db, vec, offline_router):
+        src = _make_doc(kb)
+        idx = _indexer(db, vec, offline_router)
+        r1 = idx.import_document(str(src), stance="liberal")
+        r2 = idx.import_document(str(src), stance="liberal")
+        assert r2.get("skipped") == "exact_duplicate"
+        assert r2["existing"] == r1["doc_id"]
+
+    def test_new_version_detect_and_replace(self, kb, db, vec, offline_router):
+        src = _make_doc(kb)
+        idx = _indexer(db, vec, offline_router)
+        r1 = idx.import_document(str(src), stance="liberal")
+        # 同路径改内容 = 新版本
+        src.write_text(src.read_text(encoding="utf-8") +
+                       "\n新增一段：市场也需要法治框架。\n", encoding="utf-8")
+        r2 = idx.import_document(str(src), stance="liberal",
+                                 on_duplicate="skip")
+        assert r2.get("skipped") == "new_version_detected"
+        r3 = idx.import_document(str(src), stance="liberal",
+                                 on_duplicate="replace")
+        assert r3["doc_id"] != r1["doc_id"]
+        assert db.get_document(r1["doc_id"]) is None    # 旧版已软删
+        assert db.get_document(r3["doc_id"]) is not None
+

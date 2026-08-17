@@ -18,12 +18,50 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import config
 
 
-def cmd_import(args) -> int:
-    from ingestion.indexer import Indexer
-    config.ensure_dirs()
-    idx = Indexer()
-    print(f"解析并分析中: {args.source}")
-    pv = idx.preview(args.source)
+SUPPORTED_EXTS = {".pdf", ".docx", ".doc", ".xlsx", ".xls",
+                  ".txt", ".md", ".markdown"}
+
+
+def _collect_sources(inputs: list[str]) -> tuple[list[str], list[str]]:
+    """展开目录为文件列表；返回 (可导入, 不支持的文件)。"""
+    sources: list[str] = []
+    unsupported: list[str] = []
+    for s in inputs:
+        if s.lower().startswith(("http://", "https://")):
+            sources.append(s)
+            continue
+        p = Path(s)
+        if p.is_dir():
+            for f in sorted(p.rglob("*")):
+                if f.is_file():
+                    (sources if f.suffix.lower() in SUPPORTED_EXTS
+                     else unsupported).append(str(f))
+        else:
+            sources.append(s)
+    return sources, unsupported
+
+
+def _import_single(idx, source: str, args) -> int:
+    """单文件：交互确认立场 + 查重提示。"""
+    print(f"解析并分析中: {source}")
+    pv = idx.preview(source)
+    if pv.duplicate:
+        dup = pv.duplicate
+        kind = {"exact": "完全重复", "new_version": "检测到新版本",
+                "semantic": "疑似同书不同版本"}[dup["type"]]
+        print(f"  ⚠ {kind}: 库内已有 {dup['existing_doc_id']}"
+              f"（{dup.get('existing_title') or '-'}）")
+        if args.on_duplicate == "replace":
+            idx.delete_document(dup["existing_doc_id"])
+            print(f"  已删除旧版 {dup['existing_doc_id']}")
+            if dup["type"] == "exact":
+                pv = idx.preview(source)   # 补跑完整分析
+        elif dup["type"] == "exact":
+            print("  已跳过（--on-duplicate replace 可替换重入）")
+            return 0
+        elif dup["type"] == "new_version" and args.on_duplicate == "skip":
+            print("  已跳过（--on-duplicate replace 替换 / keep-both 共存）")
+            return 0
     d = pv.to_dict()
     print(f"  标题: {d['title']}  章节: {d['chapters']}  "
           f"分块: {d['chunks']}  tokens≈{d['token_estimate']}")
@@ -42,6 +80,60 @@ def cmd_import(args) -> int:
           f"chunks={result['chunks']}")
     print(f"meta: {result['meta_path']}")
     return 0
+
+
+def cmd_import(args) -> int:
+    from ingestion.indexer import Indexer
+    config.ensure_dirs()
+    idx = Indexer()
+    sources, unsupported = _collect_sources(args.source)
+    if not sources:
+        print("没有可导入的文件")
+        return 1
+    if len(sources) == 1 and not unsupported:
+        return _import_single(idx, sources[0], args)
+
+    # 批量：预估 → 确认 → 逐文件异常隔离执行 → 三栏报告
+    print(f"批量导入 {len(sources)} 个文件"
+          + (f"（另有 {len(unsupported)} 个不支持格式已跳过）" if unsupported else ""))
+    estimates: dict[str, dict] = {}
+    failed: list[tuple[str, str]] = []
+    for s in sources:
+        try:
+            estimates[s] = idx.estimate(s)
+        except Exception as exc:
+            failed.append((s, f"解析失败: {exc}"))
+    total = sum(e["token_estimate"] for e in estimates.values())
+    print(f"预计消耗 tokens≈{total}（摘要/坐标/分类将调用 LLM）")
+    if not args.yes:
+        if input("继续？[y/N]: ").strip().lower() not in ("y", "yes"):
+            print("已取消")
+            return 0
+    ok: list[tuple[str, str]] = []
+    skipped: list[tuple[str, str]] = [(s, "不支持的格式") for s in unsupported]
+    for s, est in estimates.items():
+        try:
+            r = idx.import_document(s, stance=args.stance,
+                                    on_duplicate=args.on_duplicate,
+                                    parsed=est["parsed"])
+            if r.get("skipped"):
+                skipped.append((s, r["skipped"]))
+                print(f"  - 跳过 {est['title']}（{r['skipped']}）")
+            else:
+                ok.append((s, r["doc_id"]))
+                print(f"  + 入库 {est['title']} -> {r['doc_id']}")
+        except Exception as exc:
+            failed.append((s, str(exc)))
+            print(f"  ! 失败 {s}: {exc}")
+    print("\n===== 导入报告 =====")
+    print(f"成功 {len(ok)} · 跳过 {len(skipped)} · 失败 {len(failed)}")
+    for s, did in ok:
+        print(f"  成功  {s} -> {did}")
+    for s, why in skipped:
+        print(f"  跳过  {s}（{why}）")
+    for s, why in failed:
+        print(f"  失败  {s}（{why}）")
+    return 0 if not failed else 1
 
 
 def cmd_rebut(args) -> int:
@@ -210,10 +302,13 @@ def build_parser() -> argparse.ArgumentParser:
                                 description=f"Debate Engine {config.VERSION} CLI")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    sp = sub.add_parser("import", help="导入文档/URL")
-    sp.add_argument("source")
+    sp = sub.add_parser("import", help="导入文档/URL/文件夹（可多个）")
+    sp.add_argument("source", nargs="+")
     sp.add_argument("--stance", default=None, help="指定立场（跳过确认）")
-    sp.add_argument("--yes", action="store_true", help="自动采纳推断立场")
+    sp.add_argument("--yes", action="store_true", help="自动采纳推断立场/跳过批量确认")
+    sp.add_argument("--on-duplicate", dest="on_duplicate", default="skip",
+                    choices=["skip", "replace", "keep-both"],
+                    help="重复处置：跳过/替换旧版/两版共存")
     sp.set_defaults(fn=cmd_import)
 
     sp = sub.add_parser("rebut", help="生成反驳")

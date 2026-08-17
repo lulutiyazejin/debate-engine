@@ -507,3 +507,9 @@ AI 分错立场后用户可改，六处数据同步；项目12 右键菜单直�
 - `cli.py`：migrate 子命令（五表+FTS+向量+摘要缓存+meta+归档文件+INDEX 同步改写，迁移前自动备份，幂等可重跑）；版本字符串改引用 config.VERSION
 - `main.py` / `api/diagnostics.py`：版本改引用 config.VERSION
 - `tests/test_storage.py`：级联删除测试改软删+硬删双语义；新增 content_hash/source_path 查询测试（共 44 条）
+
+### 批 2（项目2 查重 + 项目3 批量/断点扩展）—— 46 测试全绿
+- `ingestion/indexer.py`：preview 查重前置（exact 短路不烧 LLM；same_path 异 hash → new_version）；语义近重复（全书摘要向量余弦 >0.92 → semantic 提示）；Stage 4/5/6 断点缓存（__doc__ 级 progress 标记 + summaries.json 扩展 doc_summary/coordinates/classification）；import_document 支持 on_duplicate skip/replace/keep-both；estimate() 解析+切块预估（无 LLM 消耗，parsed 可传入 preview 避免双跑）
+- `cli.py`：import 支持多源/文件夹递归（SUPPORTED_EXTS 过滤）；批量流程：token 预估确认（--yes 跳过）→ 逐文件异常隔离 → 成功/跳过/失败三栏报告；--on-duplicate 参数；单文件保留交互确认+查重提示
+- `api/import_doc.py`：预览响应带 duplicate；confirm 支持 on_duplicate（exact 未选 replace 返 409）；POST /api/import/batch 后台批量 + GET /api/import/progress 进度轮询（供项目12 导入 UI）
+- `tests/test_pipeline.py`：新增 TestDedup（exact 跳过 / new_version 检测与 replace），共 46 条
