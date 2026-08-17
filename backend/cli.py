@@ -165,7 +165,49 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _split_cmdline(line: str) -> list[str]:
+    """拆分交互命令：posix=False 保护 Windows 路径反斜杠，再去掉成对引号。"""
+    import shlex
+    tokens = shlex.split(line, posix=False)
+    return [t[1:-1] if len(t) >= 2 and t[0] == t[-1] and t[0] in "\"'" else t
+            for t in tokens]
+
+
+def interactive() -> int:
+    """无参数启动（双击 exe）时进入交互模式，窗口不再一闪而过。"""
+    parser = build_parser()
+    print("=" * 50)
+    print("  Debate Engine 0.1.0 · 交互模式")
+    print("=" * 50)
+    print("输入命令后回车执行，输入 exit 退出：")
+    print('  health                              健康检查')
+    print('  import 文件路径 --stance liberal     导入文档')
+    print('  rebut "对方论点" --stance liberal    生成反驳')
+    print('  search "关键词" --stance liberal     搜索知识库')
+    print('  serve                               启动 HTTP API')
+    print()
+    while True:
+        try:
+            line = input("debate> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return 0
+        if not line:
+            continue
+        if line.lower() in ("exit", "quit", "q"):
+            return 0
+        try:
+            args = parser.parse_args(_split_cmdline(line))
+            args.fn(args)
+        except SystemExit:
+            pass  # argparse 报错/帮助不退出交互循环
+        except Exception as exc:  # 单条命令失败不关窗口
+            print(f"出错: {exc}")
+
+
 def main() -> int:
+    if len(sys.argv) == 1:
+        return interactive()
     args = build_parser().parse_args()
     return args.fn(args)
 
