@@ -1,0 +1,102 @@
+# ===== Tauri / Rust =====
+target/
+dist/
+.cargo/
+Cargo.lock
+*.pdb
+*.exe
+*.msi
+*.nsis
+release/
+src-tauri/target/
+
+# ===== Node / React =====
+node_modules/
+.pnp
+.pnp.js
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.npm/
+.cache/
+build/
+dist/
+out/
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+.env
+*.env
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# ===== 知识库运行时数据（不上传文档内容）=====
+knowledge_base/stances/
+knowledge_base/shared/
+knowledge_base/inbox/
+knowledge_base/vector_store/
+knowledge_base/logs/
+knowledge_base/INDEX.md
+
+# ===== 日志 =====
+logs/
+*.log
+*.jsonl
+
+# ===== 模型文件（体积过大）=====
+models/
+*.onnx
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.gguf
+
+# ===== 数据库 =====
+*.db
+*.sqlite
+*.sqlite3
+
+# ===== API Keys / 敏感配置 =====
+.env
+.env.local
+.env.*.local
+config/secrets.toml
+config/api_keys.json
+
+# ===== 系统文件 =====
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/settings.json
+*.swp
+*.swo
+*~
+
+# ===== Tauri 构建产物 =====
+app/src-tauri/target/
+app/dist/
+app/node_modules/
+
+# ===== Python 虚拟环境 =====
+backend/.venv/
+backend/venv/
