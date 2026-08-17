@@ -65,3 +65,39 @@ def parse_argument(argument: str, router: ModelRouter | None = None,
     if orig_neg and not claim_neg:
         parsed["core_claim"] = argument
     return parsed
+
+
+_FALLACY_PROMPT = (
+    "对照下方谬误特征表，检查论点是否疑似含有逻辑谬误。只输出 JSON：\n"
+    '{{"detected_fallacies": [{{"name": "谬误名（必须出自特征表）", '
+    '"quote": "论点中的原话片段", "reason": "一句话理由"}}]}}\n'
+    "没有明显谬误时输出空数组，不要强行挑刺。\n\n"
+    "谬误特征表：\n{table}\n\n论点：{argument}")
+
+
+def detect_fallacies(argument: str, router: ModelRouter | None = None,
+                     trace_id: str | None = None) -> list[dict]:
+    """谬误检测（项目6）：一律疑似提示不下断言；离线/表缺失返空。"""
+    from storage.skill_loader import get_skill_loader
+    table = get_skill_loader().fallacies()
+    if not table:
+        return []
+    lines = [f"- {name}：{desc.replace(chr(10), ' ')[:120]}"
+             for name, desc in table.items()]
+    r = router or get_router()
+    out, provider = r.run(
+        "parse",
+        [{"role": "user",
+          "content": _FALLACY_PROMPT.format(table="\n".join(lines),
+                                            argument=argument[:1000])}],
+        trace_id=trace_id, max_tokens=500, temperature=0.1)
+    if provider == "offline":
+        return []   # 离线兜底模型无判断力，不出谬误提示
+    data = extract_json(out)
+    found = data.get("detected_fallacies", []) if isinstance(data, dict) else []
+    valid = set(table)
+    return [{"name": str(f.get("name", ""))[:40],
+             "quote": str(f.get("quote", ""))[:200],
+             "reason": str(f.get("reason", ""))[:200]}
+            for f in found
+            if isinstance(f, dict) and f.get("name") in valid][:5]

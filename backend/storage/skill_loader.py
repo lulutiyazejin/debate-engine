@@ -122,6 +122,44 @@ class SkillLoader:
     def get_ingestion(self, name: str) -> Skill | None:
         return self.ingestion().get(name) or self.ingestion().get("default")
 
+    # ---------- 单文件知识库（0.1.1：谬误表 + 风格库） ----------
+    def fallacies(self, reload: bool = False) -> dict[str, str]:
+        """fallacies.md → {谬误名: 定义+识别特征}。文件缺失返空。"""
+        if reload or "fallacies" not in self._cache:
+            p = self.root / "fallacies.md"
+            out: dict[str, str] = {}
+            if p.exists():
+                text = p.read_text(encoding="utf-8")
+                if not _check_injection(text):
+                    sk = parse_skill_md(p)
+                    out = {k: v for k, v in sk.sections.items() if v}
+            self._cache["fallacies"] = out  # type: ignore[assignment]
+        return self._cache["fallacies"]  # type: ignore[return-value]
+
+    def styles(self, reload: bool = False) -> dict[str, dict]:
+        """styles.md → {键名: {label, prompt, demo_warning}}。文件缺失返空。
+
+        段落标题格式：`## 键名 显示名`；正文含「反面演示」行时标记警示。"""
+        if reload or "styles" not in self._cache:
+            p = self.root / "styles.md"
+            out: dict[str, dict] = {}
+            if p.exists():
+                text = p.read_text(encoding="utf-8")
+                if not _check_injection(text):
+                    sk = parse_skill_md(p)
+                    for head, body in sk.sections.items():
+                        parts = head.split(None, 1)
+                        key = parts[0]
+                        label = parts[1] if len(parts) > 1 else key
+                        lines = [ln for ln in body.splitlines() if ln.strip()]
+                        demo = any(ln.strip() == "反面演示" for ln in lines)
+                        prompt = "\n".join(ln for ln in lines
+                                           if ln.strip() != "反面演示")
+                        out[key] = {"label": label, "prompt": prompt,
+                                    "demo_warning": demo}
+            self._cache["styles"] = out  # type: ignore[assignment]
+        return self._cache["styles"]  # type: ignore[return-value]
+
 
 _loader: SkillLoader | None = None
 

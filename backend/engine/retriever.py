@@ -36,19 +36,24 @@ class HybridRetriever:
 
     def retrieve(self, implicit_target: str, core_claim: str,
                  doc_ids: list[str] | None = None,
-                 top_k: int = 30) -> dict:
+                 top_k: int = 30, mode: str = "hybrid") -> dict:
         """双路粗检索 + RRF。返回 {candidates: [...], fts_hits, vector_hits}。
-        doc_ids 为 None 表示不过滤；为空列表表示无可检索文档（直接空结果）。"""
+        doc_ids 为 None 表示不过滤；为空列表表示无可检索文档（直接空结果）。
+        mode（项目8）: keyword=仅 FTS5 / semantic=仅向量 / hybrid=RRF 双路。"""
         if doc_ids is not None and not doc_ids:
             return {"candidates": [], "fts_hits": 0, "vector_hits": 0}
 
-        emb = get_embedder()
-        qvec = emb.embed(implicit_target or core_claim)
-        v_hits = self.vec.search(qvec, top_k=config.RETRIEVAL_TOP_K_COARSE,
-                                 doc_ids=doc_ids)
-        f_hits = self.db.fts_search(core_claim or implicit_target,
-                                    top_k=config.RETRIEVAL_TOP_K_COARSE,
-                                    doc_ids=doc_ids)
+        v_hits: list[dict] = []
+        f_hits: list[dict] = []
+        if mode != "keyword":
+            emb = get_embedder()
+            qvec = emb.embed(implicit_target or core_claim)
+            v_hits = self.vec.search(qvec, top_k=config.RETRIEVAL_TOP_K_COARSE,
+                                     doc_ids=doc_ids)
+        if mode != "semantic":
+            f_hits = self.db.fts_search(core_claim or implicit_target,
+                                        top_k=config.RETRIEVAL_TOP_K_COARSE,
+                                        doc_ids=doc_ids)
         fused = rrf_fuse(v_hits, f_hits)[:top_k]
         # 附全文与元数据
         for c in fused:

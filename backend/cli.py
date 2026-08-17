@@ -141,26 +141,36 @@ def cmd_rebut(args) -> int:
     from engine.rebuttal_engine import RebuttalEngine
     config.ensure_dirs()
     t0 = time.perf_counter()
-    result = RebuttalEngine().generate(args.argument, args.stance,
-                                       args.format, args.style)
+    result = RebuttalEngine().generate(
+        args.argument, args.stance, args.format, args.style,
+        length=args.length, cite_format=args.cite_format,
+        fallacy=not args.no_fallacy, mode=args.mode)
     dt = time.perf_counter() - t0
     print(f"\n=== 反驳（{result['provider']} · {args.format}/{args.style} · "
           f"{dt:.1f}s）===\n")
     print(result["rebuttal"])
+    if result["detected_fallacies"]:
+        print("\n--- 对方疑似谬误 ---")
+        for f in result["detected_fallacies"]:
+            print(f"  疑似{f['name']}：{f['quote']}（{f['reason']}）")
     if result["citations"]:
         print("\n--- 引用 ---")
-        for c in result["citations"]:
-            print(f"  [{c['id']}] {c['author']}《{c['title']}》"
-                  f"{c['year']} {c['pages']}")
+        for line in result["citations_formatted"]:
+            print(f"  {line}")
     else:
         print("\n（无引用：知识库可能为空或无相关资料）")
+    q = result["quality"]
+    print(f"\n检索质量：上下文相关性 {q['context_relevance']:.2f} · "
+          f"块利用率 {q['chunk_utilization']:.2f}")
+    if result["length_note"]:
+        print(f"字数提示：{result['length_note']}")
     return 0
 
 
 def cmd_search(args) -> int:
     from engine.reranker import RetrievalChain
     config.ensure_dirs()
-    r = RetrievalChain().run(args.query, args.stance)
+    r = RetrievalChain().run(args.query, args.stance, mode=args.mode)
     print(f"检索 {args.query!r} · 立场 {args.stance} · "
           f"{r['retrieval_ms']}ms · 排除 {len(r['route']['excluded'])} 篇")
     if not r["chunks"]:
@@ -291,6 +301,40 @@ def cmd_migrate(_args) -> int:
     return 0
 
 
+_ENV_KEY_NAMES = {"groq": "GROQ_API_KEY", "gemini": "GEMINI_API_KEY",
+                  "cerebras": "CEREBRAS_API_KEY",
+                  "mistral": "MISTRAL_API_KEY",
+                  "openrouter": "OPENROUTER_API_KEY"}
+
+
+def _env_file_path() -> Path:
+    """开发态写 backend/.env；打包后写 exe 同目录 .env。"""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).parent / ".env"
+    return config.BACKEND_DIR / ".env"
+
+
+def cmd_config(args) -> int:
+    """写入 API Key 到 .env 并热重载（项目7；图形设置页走 /api/config）。"""
+    import os
+    from models.model_router import reset_router
+    key_name = _ENV_KEY_NAMES.get(args.provider)
+    if not key_name:
+        print(f"未知服务商: {args.provider}，可选: {list(_ENV_KEY_NAMES)}")
+        return 1
+    env = _env_file_path()
+    lines = env.read_text(encoding="utf-8").splitlines() if env.exists() else []
+    lines = [ln for ln in lines if not ln.startswith(key_name + "=")]
+    lines.append(f"{key_name}={args.key}")
+    env.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    # 热重载：直接更新进程内 Key + 重建路由器，无需重启
+    os.environ[key_name] = args.key
+    config.PROVIDER_KEYS[args.provider] = args.key
+    reset_router()
+    print(f"已写入 {key_name} 到 {env} 并热重载")
+    return 0
+
+
 def cmd_serve(_args) -> int:
     import uvicorn
     from main import app
@@ -321,12 +365,26 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--stance", required=True)
     sp.add_argument("--format", default="argument",
                     choices=["quick", "argument", "report"])
-    sp.add_argument("--style", default="rebuttal")
+    sp.add_argument("--style", default="rebuttal",
+                    help="风格键名（见 styles.md，如 dialectical/reductio）")
+    sp.add_argument("--length", type=int, default=None,
+                    help="目标字数（汉字，20-2000，优先于格式默认篇幅）")
+    sp.add_argument("--cite-format", dest="cite_format", default="plain",
+                    choices=["plain", "gbt7714", "apa"],
+                    help="引用导出格式")
+    sp.add_argument("--no-fallacy", dest="no_fallacy", action="store_true",
+                    help="关闭谬误检测")
+    sp.add_argument("--mode", default="hybrid",
+                    choices=["keyword", "semantic", "hybrid", "smart"],
+                    help="检索模式")
     sp.set_defaults(fn=cmd_rebut)
 
     sp = sub.add_parser("search", help="搜索知识库")
     sp.add_argument("query")
     sp.add_argument("--stance", required=True)
+    sp.add_argument("--mode", default="hybrid",
+                    choices=["keyword", "semantic", "hybrid", "smart"],
+                    help="搜索模式：关键词/语义/混合/智能改写")
     sp.set_defaults(fn=cmd_search)
 
     sp = sub.add_parser("eval", help="质量评估")
@@ -343,6 +401,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("migrate", help="旧库迁移（路径哈希→内容哈希）")
     sp.set_defaults(fn=cmd_migrate)
+
+    sp = sub.add_parser("config", help="配置 API Key（写 .env + 热重载）")
+    sp.add_argument("provider", help="服务商：groq/gemini/cerebras/mistral/openrouter")
+    sp.add_argument("key", help="API Key")
+    sp.set_defaults(fn=cmd_config)
 
     sp = sub.add_parser("serve", help="启动 FastAPI 服务")
     sp.set_defaults(fn=cmd_serve)

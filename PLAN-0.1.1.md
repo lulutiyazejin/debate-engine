@@ -522,3 +522,14 @@ AI 分错立场后用户可改，六处数据同步；项目12 右键菜单直�
 - `cli.py`：--summary-strategy 参数；`api/import_doc.py`：ImportRequest/BatchRequest 加 summary_strategy
 - `knowledge_base/skills/ingestion/data_table.skill.md`（新建）
 - 修复：批〉编辑吃掉换行导致 SyntaxError（mkdir 行与 meta= 挤同行），复读定位修正；test_resume monkeypatch 目标改 summarize_chapter_with_args
+
+### 批 4（项目6 谬误 + 项目7 输出参数 + 项目8 检索升级）—— 46 测试全绿
+- `knowledge_base/skills/fallacies.md`（新建，24 谬误：名称/定义/识别特征，用户可增删）；`styles.md`（新建，8 旧 + 5 新风格：dialectical/vulgar_dialectic反面演示/reductio/immanent/audience）
+- `storage/skill_loader.py`：fallacies() + styles() 单文件加载（含注入检测，「反面演示」行识别）
+- `engine/argument_parser.py`：detect_fallacies（特征表注入、一律疑似、离线返空、名称白名单校验限 5 条）
+- `engine/rebuttal_engine.py`：get_styles 配置化（缺失回落内置）；反面演示头部警示；build_prompt 注入谬误+自检约束+字数要求；generate 加 length（上限 2000 超出报错，偏差±30% 仅提示）/cite_format/fallacy/mode；format_citations GB/T 7714+APA+plain；_char_overlap 块利用率；quality 两维进响应
+- `engine/retriever.py`：mode 分支 keyword/semantic/hybrid；`engine/reranker.py`：smart 查询改写（失败回落 hybrid）+ context_relevance 评分写入检索日志 quality 通道
+- `models/model_router.py`：reset_router（Key 热重载后重建）
+- `cli.py`：rebut --length/--cite-format/--no-fallacy/--mode，输出尾部质量行+疑似谬误栏；search --mode；config 子命令（写 .env+热重载）
+- `api/rebuttal.py`：参数透传 + GET /api/rebuttal/options（供项目12 选择器）；`api/settings.py`（新建：GET providers 不回明文 / POST key / DELETE key）挂载 main.py
+- 修复：_FALLACY_PROMPT JSON 花括号未转义致 format KeyError；test_hallucination_retry 改 fallacy=False 保持原验证语义；修正工具容错引入的两处错字（道草人→稻草人、兑底→兜底）

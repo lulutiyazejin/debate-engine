@@ -78,3 +78,9 @@ def get_router() -> ModelRouter:
     if _router is None:
         _router = ModelRouter()
     return _router
+
+
+def reset_router() -> None:
+    """Key 热重载后重建路由器（config 命令/设置页保存时调用）。"""
+    global _router
+    _router = None

@@ -120,7 +120,8 @@ class TestRebuttal:
         engine = RebuttalEngine(
             chain=RetrievalChain(sqlite=db, vectors=vec, router=offline_router),
             router=router, sqlite=db)
-        r = engine.generate("市场经济已经失败", "liberal", "quick", "rebuttal")
+        r = engine.generate("市场经济已经失败", "liberal", "quick", "rebuttal",
+                            fallacy=False)  # 关谬误检测，只验证幻觉重试两跳
         assert "[C9]" not in r["rebuttal"]  # 无效引用被重试修正
         assert bad.calls == 2
 
