@@ -155,9 +155,8 @@ Section "程序主体（必需）" SecMain
 SectionEnd
 
 Section "创建桌面快捷方式" DesktopShortcuts
-    ; 直接双击 exe 会打印帮助后秒退（CLI 程序无参数行为），
-    ; 故桌面快捷方式指向常驻命令行窗口，图标用主程序的
-    CreateShortcut "$DESKTOP\Debate Engine.lnk" "$SYSDIR\cmd.exe" '/k "cd /d $INSTDIR && DebateEngine health"' "$INSTDIR\DebateEngine.exe" 0
+    ; 直接指向主程序：无参数启动→交互模式（中文菜单、窗口常驻）
+    CreateShortcut "$DESKTOP\Debate Engine.lnk" "$INSTDIR\DebateEngine.exe"
 SectionEnd
 
 ; ---------- 卸载（组件勾选页：程序必删，数据默认保留） ----------
