@@ -27,7 +27,7 @@ def health():
     skills = get_skill_loader()
     return {
         "status": "ok" if db_ok else "degraded",
-        "version": "0.1.0",
+        "version": config.VERSION,
         "sqlite": {"ok": db_ok, "path": str(config.SQLITE_PATH), **(
             stats if isinstance(stats, dict) else {})},
         "vector_store": {"count": vec_count},

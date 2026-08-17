@@ -13,6 +13,12 @@ try:
 except ImportError:
     pass
 
+# ---------- 版本（全局唯一来源，main/diagnostics/cli 均引用此处） ----------
+VERSION = "0.1.1"
+
+# ---------- 存储后端（服务器级抽象层：当前仅 sqlite，未来可插 postgres） ----------
+STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "sqlite")
+
 # ---------- 路径 ----------
 BACKEND_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BACKEND_DIR.parent
@@ -87,6 +93,20 @@ SHORT_DOC_TOKENS = 2000       # 短文章阈值（不切割）
 # ---------- 服务 ----------
 API_HOST = os.getenv("API_HOST", "127.0.0.1")
 API_PORT = int(os.getenv("API_PORT", "7700"))
+
+
+def reload_provider_keys() -> None:
+    """config 命令/设置页写入 .env 后热重载 Key，无需重启。"""
+    try:
+        from dotenv import load_dotenv as _ld
+        _ld(override=True)
+    except ImportError:
+        pass
+    for name, env in (("groq", "GROQ_API_KEY"), ("gemini", "GEMINI_API_KEY"),
+                      ("cerebras", "CEREBRAS_API_KEY"),
+                      ("mistral", "MISTRAL_API_KEY"),
+                      ("openrouter", "OPENROUTER_API_KEY")):
+        PROVIDER_KEYS[name] = os.getenv(env, "")
 
 
 def ensure_dirs() -> None:

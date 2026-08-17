@@ -20,7 +20,8 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="Debate Engine API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Debate Engine API", version=config.VERSION,
+              lifespan=lifespan)
 app.include_router(rebuttal.router)
 app.include_router(import_doc.router)
 app.include_router(knowledge.router)

@@ -44,6 +44,7 @@ class ImportPreview:
     coordinates: dict = field(default_factory=dict)
     classification: dict = field(default_factory=dict)
     token_estimate: int = 0
+    content_hash: str = ""
 
     def to_dict(self) -> dict:
         return {"doc_id": self.doc_id, "trace_id": self.trace_id,
@@ -62,10 +63,20 @@ class ImportPreview:
 PENDING: dict[str, ImportPreview] = {}
 
 
-def _doc_id_for(source: str) -> str:
-    """同一来源重复导入得到相同 doc_id（幂等 + 断点恢复的前提）。"""
-    h = hashlib.sha256(str(source).encode("utf-8")).hexdigest()[:12]
-    return f"doc_{h}"
+def _content_hash(source: str, parsed: ParsedDocument) -> str:
+    """内容哈希：本地文件哈希字节；URL/无文件哈希解析后正文。
+
+    doc_id 由此而来：同内容得同 ID（换目录不重复入库）；
+    内容改动得新 ID（配合 source_path 字段识别“新版本”）。
+    """
+    p = Path(source)
+    if p.exists() and p.is_file():
+        return hashlib.sha256(p.read_bytes()).hexdigest()
+    return hashlib.sha256(parsed.full_text.encode("utf-8")).hexdigest()
+
+
+def _doc_id_from_hash(content_hash: str) -> str:
+    return f"doc_{content_hash[:12]}"
 
 
 class Indexer:
@@ -87,10 +98,12 @@ class Indexer:
     # ---------- Stage 0-6：预览 ----------
     def preview(self, source: str, trace_id: str | None = None) -> ImportPreview:
         trace_id = trace_id or new_trace_id()
-        doc_id = _doc_id_for(source)
 
         with Timer() as t:
             parsed = parse_any(source)                     # Stage 0
+        # doc_id = 内容哈希（必须先解析：URL 类来源需要正文）
+        content_hash = _content_hash(source, parsed)
+        doc_id = _doc_id_from_hash(content_hash)
         log_ingestion(trace_id, "stage_done", doc_id, stage="parse",
                       status="done", duration_ms=t.ms)
 
@@ -134,7 +147,8 @@ class Indexer:
             doc_id=doc_id, trace_id=trace_id, source=str(source),
             parsed=parsed, chunks=chunks, chapter_summaries=summaries,
             doc_summary=doc_summary, coordinates=coords, classification=cls,
-            token_estimate=sum(c.token_count for c in chunks))
+            token_estimate=sum(c.token_count for c in chunks),
+            content_hash=content_hash)
         PENDING[doc_id] = pv
         return pv
 
@@ -152,6 +166,8 @@ class Indexer:
             "import_date": date.today().isoformat(),
             "quality_score": pv.classification.get("confidence", 0.5),
             "summary": pv.doc_summary,
+            "content_hash": pv.content_hash,
+            "source_path": str(pv.source),
             "provenance": {"source": pv.source,
                            "coordinates": pv.coordinates,
                            "classification": pv.classification}})

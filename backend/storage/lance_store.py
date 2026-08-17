@@ -13,6 +13,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import config
+from storage.base import VectorStoreBase
 
 try:
     import lancedb
@@ -20,15 +21,6 @@ try:
     _HAS_LANCE = True
 except ImportError:
     _HAS_LANCE = False
-
-
-class VectorStoreBase:
-    def add(self, chunk_id: str, doc_id: str, vector: np.ndarray,
-            embedding_model: str) -> None: ...
-    def search(self, vector: np.ndarray, top_k: int = 20,
-               doc_ids: list[str] | None = None) -> list[dict]: ...
-    def delete_doc(self, doc_id: str) -> int: ...
-    def count(self) -> int: ...
 
 
 class LanceVectorStore(VectorStoreBase):
@@ -82,6 +74,22 @@ class LanceVectorStore(VectorStoreBase):
         before = self._table.count_rows()
         self._table.delete(f'doc_id = "{doc_id}"')
         return before - self._table.count_rows()
+
+    def rename_doc(self, old_doc_id, new_doc_id):
+        """doc_id 迁移（migrate 命令用）：取出旧行→删除→改名重写。"""
+        if self._table is None:
+            return 0
+        rows = [r for r in self._table.to_arrow().to_pylist()
+                if r["doc_id"] == old_doc_id]
+        if not rows:
+            return 0
+        self._table.delete(f'doc_id = "{old_doc_id}"')
+        self._table.add([{
+            "chunk_id": r["chunk_id"].replace(old_doc_id, new_doc_id, 1),
+            "doc_id": new_doc_id,
+            "embedding_model": r["embedding_model"],
+            "vector": np.asarray(r["vector"], dtype=np.float32)} for r in rows])
+        return len(rows)
 
     def count(self):
         return self._table.count_rows() if self._table is not None else 0
@@ -148,6 +156,17 @@ class NumpyVectorStore(VectorStoreBase):
             self.vec_path.unlink()
         self._save()
         return removed
+
+    def rename_doc(self, old_doc_id, new_doc_id):
+        n = 0
+        for m in self.meta:
+            if m["doc_id"] == old_doc_id:
+                m["doc_id"] = new_doc_id
+                m["chunk_id"] = m["chunk_id"].replace(old_doc_id, new_doc_id, 1)
+                n += 1
+        if n:
+            self._save()
+        return n
 
     def count(self):
         return len(self.meta)

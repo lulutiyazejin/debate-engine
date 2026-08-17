@@ -40,16 +40,34 @@ class TestSqlite:
         assert hits and all(h["doc_id"] == "doc_b" for h in hits)
 
     def test_cascade_delete(self, db):
+        """0.1.1 新语义：默认软删（可恢复），硬删物理级联。"""
         _seed(db)
         db.insert_arg_unit({"arg_id": "a1", "chunk_id": "doc_a_c0000",
                             "doc_id": "doc_a", "claim": "x"})
         db.set_progress("doc_a", "doc_a_ch000", "summarized", "done")
+        # 软删：标记 + FTS 清除，检索/列表立刻干净，元数据保留
         counts = db.delete_document("doc_a")
         assert counts["documents"] == 1
-        assert counts["chunks"] == 1
         assert counts["fts_index"] == 1
         assert db.get_document("doc_a") is None
+        assert db.get_document("doc_a", include_deleted=True) is not None
         assert db.fts_search("价格信号") == []
+        assert db.stats()["documents"] == 0
+        assert db.stats()["chunks"] == 0  # 存活统计不含软删文档
+        # 硬删：物理级联清除
+        counts = db.delete_document("doc_a", hard=True)
+        assert counts["chunks"] == 1
+        assert db.get_document("doc_a", include_deleted=True) is None
+
+    def test_content_hash_lookup(self, db):
+        """服务器级 schema 新列：哈希查重与路径查新版本。"""
+        _seed(db)
+        db.upsert_document({"doc_id": "doc_a", "title": "测试文档",
+                            "stance": "liberal", "content_hash": "h" * 64,
+                            "source_path": "C:/docs/a.pdf"})
+        assert db.find_by_hash("h" * 64)["doc_id"] == "doc_a"
+        assert db.find_by_source_path("C:/docs/a.pdf")["doc_id"] == "doc_a"
+        assert db.find_by_hash("x" * 64) is None
 
     def test_progress_resume(self, db):
         assert db.get_progress("d", "c", "summarized") is None

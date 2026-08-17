@@ -498,4 +498,12 @@ AI 分错立场后用户可改，六处数据同步；项目12 右键菜单直�
 
 > 实施时逐批追加：批次 / 文件 / 改动摘要 / 编译与测试结果
 
-（待开工）
+### 批 1（项目1 数据地基）—— 44 测试全绿
+- `storage/base.py`（新建）：MetadataStoreBase / VectorStoreBase 抽象接口 + get_metadata_store 工厂（决策 9 存储抽象层）
+- `storage/sqlite_store.py`：服务器级 schema（documents +content_hash/source_path/created_at/updated_at/deleted_at；arg_units +evidence/thinker/school/relation/target_unit_id；全新库严格外键 ON DELETE CASCADE；覆盖索引 ×5）；WAL + foreign_keys PRAGMA；_MIGRATIONS 表驱动增量列迁移（旧库幂等补列）；upsert_document 改 UPSERT 保 created_at；find_by_hash / find_by_source_path；软删默认 + 硬删级联（子表先删防 CASCADE 计数失真）+ purge_deleted；stats 只计存活；list_arg_units
+- `storage/lance_store.py`：VectorStoreBase 改为引用 base；两实现均新增 rename_doc（迁移用）
+- `ingestion/indexer.py`：doc_id 改内容哈希（文件哈字节、URL 哈正文；解析先行）；ImportPreview +content_hash；confirm 写 content_hash/source_path
+- `config.py`：VERSION="0.1.1" 全局唯一来源；STORAGE_BACKEND；reload_provider_keys 热重载
+- `cli.py`：migrate 子命令（五表+FTS+向量+摘要缓存+meta+归档文件+INDEX 同步改写，迁移前自动备份，幂等可重跑）；版本字符串改引用 config.VERSION
+- `main.py` / `api/diagnostics.py`：版本改引用 config.VERSION
+- `tests/test_storage.py`：级联删除测试改软删+硬删双语义；新增 content_hash/source_path 查询测试（共 44 条）
