@@ -54,6 +54,8 @@ knowledge_base/shared/
 knowledge_base/inbox/
 knowledge_base/vector_store/
 knowledge_base/logs/
+knowledge_base/source_files/
+knowledge_base/.cache/
 knowledge_base/INDEX.md
 
 # ===== 日志 =====
@@ -61,8 +63,8 @@ logs/
 *.log
 *.jsonl
 
-# ===== 模型文件（体积过大）=====
-models/
+# ===== 模型文件（体积过大，仅限仓库根目录，不影响 backend/models 源码）=====
+/models/
 *.onnx
 *.safetensors
 *.bin
@@ -97,6 +99,12 @@ app/src-tauri/target/
 app/dist/
 app/node_modules/
 
+# ===== PyInstaller =====
+backend/*.spec
+
 # ===== Python 虚拟环境 =====
 backend/.venv/
 backend/venv/
+
+# ===== IDE \u5de5\u4f5c\u533a =====
+.aicoding-chat-workspace
