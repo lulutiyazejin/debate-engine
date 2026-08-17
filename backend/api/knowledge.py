@@ -1,13 +1,15 @@
-"""知识库接口：GET /api/knowledge/docs、GET /api/knowledge/search。"""
+"""知识库接口：文档列表/搜索/改立场/中心点预设。"""
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel, Field
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from api.deps import get_db, get_engine
+from api.deps import get_db, get_engine, get_indexer
+from storage.skill_loader import get_skill_loader
 
 router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
 
@@ -18,13 +20,37 @@ def list_docs(stance: str | None = None):
     return {"documents": db.list_documents(stance), "stats": db.stats()}
 
 
+class StanceRequest(BaseModel):
+    stance: str = Field(min_length=1)
+
+
+@router.patch("/docs/{doc_id}/stance")
+def reassign_stance(doc_id: str, req: StanceRequest):
+    """手动改立场（项目9）：六处数据同步；供右键菜单直接调用。"""
+    try:
+        return get_indexer().reassign_stance(doc_id, req.stance)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@router.get("/centers")
+def list_centers():
+    """中心点预设列表（项目10）：供前端下拉选择。"""
+    return {"centers": [{"key": k, "label": v["label"], "note": v["note"]}
+                        for k, v in get_skill_loader().centers().items()]}
+
+
 @router.get("/search")
 def search(q: str = Query(min_length=1), stance: str = "empirical",
-           top_k: int = 5):
-    """带立场的混合检索（不生成反驳，仅返回候选块）。"""
+           top_k: int = 5, mode: str = "hybrid",
+           center: str | None = None):
+    """带立场的检索（不生成反驳，仅返回候选块）；mode/center 见项目8/10。"""
+    if mode not in ("keyword", "semantic", "hybrid", "smart"):
+        raise HTTPException(422, f"未知搜索模式 {mode}")
     chain = get_engine().chain
-    r = chain.run(q, stance)
-    return {"query": q, "stance": stance,
+    r = chain.run(q, stance, mode=mode, center=center)
+    return {"query": q, "stance": stance, "mode": mode,
+            "context_relevance": r["context_relevance"],
             "chunks": [{"chunk_id": c["chunk_id"], "doc_id": c["doc_id"],
                         "score": round(c["final_score"], 6),
                         "text": c["text"][:300]}

@@ -445,6 +445,49 @@ class Indexer:
                 "token_estimate": sum(c.token_count for c in chunks),
                 "parsed": parsed}
 
+    # ---------- 手动改立场（项目9：六处同步） ----------
+    def reassign_stance(self, doc_id: str, new_stance: str) -> dict:
+        """六处：documents.stance / meta.json 移动 / 标准化 .md 移动 /
+        INDEX.md 重生成 / 检索权重（StanceRouter 每次现算天然生效）/ 日志。"""
+        doc = self.db.get_document(doc_id)
+        if doc is None:
+            raise ValueError(f"文档不存在: {doc_id}")
+        old = doc.get("stance") or ""
+        if old == new_stance:
+            return {"doc_id": doc_id, "stance": new_stance, "moved": []}
+        # 1) documents.stance（DB 行里 JSON 字符串先还原，避免双重编码）
+        doc["stance"] = new_stance
+        doc["secondary_stances"] = json.loads(doc.get("secondary_stances") or "[]")
+        doc["provenance"] = json.loads(doc.get("provenance") or "{}")
+        self.db.upsert_document(doc)
+        # 2/3) meta.json 与标准化 .md 移动到新立场目录
+        new_dir = config.STANCES_PATH / new_stance
+        new_dir.mkdir(parents=True, exist_ok=True)
+        moved: list[str] = []
+        for p in config.STANCES_PATH.glob(f"*/{doc_id}.meta.json"):
+            data = json.loads(p.read_text(encoding="utf-8"))
+            data["stance"] = new_stance
+            target = new_dir / p.name
+            target.write_text(json.dumps(data, ensure_ascii=False, indent=2),
+                              encoding="utf-8")
+            if target != p:
+                p.unlink()
+            moved.append(str(target))
+        for p in config.STANCES_PATH.glob(f"*/{doc_id}.md"):
+            text = p.read_text(encoding="utf-8").replace(
+                f"stance: {old}", f"stance: {new_stance}", 1)
+            target = new_dir / p.name
+            target.write_text(text, encoding="utf-8")
+            if target != p:
+                p.unlink()
+            moved.append(str(target))
+        # 4) INDEX.md 重生成；5) 检索权重无需动作；6) 日志
+        self._update_index()
+        log_ingestion(new_trace_id(), "reassign", doc_id, stage="reassign",
+                      status="done", old_stance=old, new_stance=new_stance)
+        return {"doc_id": doc_id, "old_stance": old, "stance": new_stance,
+                "moved": moved}
+
     # ---------- 删除（五源级联） ----------
     def delete_document(self, doc_id: str) -> dict:
         counts = self.db.delete_document(doc_id)

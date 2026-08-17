@@ -38,7 +38,9 @@ class TestPipeline:
                            f"{result['doc_id']}.meta.json")
                           .read_text(encoding="utf-8"))
         assert meta["title"] == "通往奴役之路"
-        assert len(meta["coordinates"]) == 9
+        # 22 轴坐标 + low_confidence_axes 标记（项目10）
+        axes = [k for k in meta["coordinates"] if k != "low_confidence_axes"]
+        assert len(axes) == 22
         # 向量已入库、FTS 可检索
         assert vec.count() == result["chunks"]
         assert db.fts_search("价格信号")

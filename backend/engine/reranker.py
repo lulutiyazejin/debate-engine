@@ -3,9 +3,11 @@
 并提供 RetrievalChain 门面：解析 → 立场路由 → 混合检索 → 精排 一步到位。
 0.1.1（项目8）：搜索模式 keyword|semantic|hybrid|smart；
 免费质量评分：上下文相关性 = Top-5 向量相似度均值（写入检索日志）。
+0.1.1（项目10）：可选中心点参照加权（centers.md），默认无偏移。
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -20,6 +22,7 @@ from engine.stance_router import StanceRouter
 from models.embedder import get_embedder
 from models.model_router import ModelRouter, get_router
 from storage.lance_store import VectorStoreBase
+from storage.skill_loader import get_skill_loader
 from storage.sqlite_store import SqliteStore
 
 _REWRITE_PROMPT = (
@@ -59,6 +62,21 @@ def rerank(candidates: list[dict], weights: dict[str, float],
     return out[:top_k]
 
 
+def _center_weight(doc_coords: dict, center_coords: dict) -> float:
+    """中心点参照加权（项目10）：距中心近的文档最高 +20%，远的最低 -20%。"""
+    axes = [k for k, v in center_coords.items() if isinstance(v, (int, float))]
+    if not axes or not doc_coords:
+        return 1.0
+    total = 0.0
+    for a in axes:
+        try:
+            total += abs(float(doc_coords.get(a, 0)) - float(center_coords[a]))
+        except (TypeError, ValueError):
+            total += 0.0
+    norm = total / (10.0 * len(axes))   # 0=重合 1=最远
+    return 1.0 + (0.5 - norm) * 0.4
+
+
 class RetrievalChain:
     """核心检索链门面：论点 → Top-5 带立场权重的候选块。"""
 
@@ -71,8 +89,10 @@ class RetrievalChain:
         self.llm_router = router
 
     def run(self, argument: str, stance: str, style: str = "rebuttal",
-            trace_id: str | None = None, mode: str = "hybrid") -> dict:
-        """mode: keyword|semantic|hybrid|smart（smart=先 LLM 查询改写再 hybrid）。"""
+            trace_id: str | None = None, mode: str = "hybrid",
+            center: str | None = None) -> dict:
+        """mode: keyword|semantic|hybrid|smart（smart=先 LLM 查询改写再 hybrid）；
+        center: centers.md 预设键名，以该点为参照加权（默认无偏移）。"""
         trace_id = trace_id or new_trace_id()
         with Timer() as t:
             parsed = parse_argument(argument, router=self.llm_router,
@@ -94,6 +114,23 @@ class RetrievalChain:
                 query, parsed["core_claim"],
                 doc_ids=route["doc_ids"], mode=search_mode)
             final = rerank(coarse["candidates"], route["weights"], parsed)
+            if center:
+                cdef = get_skill_loader().centers().get(center)
+                if cdef:
+                    cache: dict[str, dict] = {}
+                    for c in final:
+                        did = c["doc_id"]
+                        if did not in cache:
+                            row = self.db.get_document(did) or {}
+                            try:
+                                prov = json.loads(row.get("provenance") or "{}")
+                            except (TypeError, ValueError):
+                                prov = {}
+                            cache[did] = prov.get("coordinates", {}) or {}
+                        w = _center_weight(cache[did], cdef["coords"])
+                        c["final_score"] *= w
+                        c["center_weight"] = round(w, 3)
+                    final.sort(key=lambda x: -x["final_score"])
         top_score = final[0]["final_score"] if final else 0.0
         relevance = context_relevance(query, final)
         log_retrieval(trace_id, argument, stance, style,

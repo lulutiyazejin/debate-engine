@@ -144,7 +144,7 @@ def cmd_rebut(args) -> int:
     result = RebuttalEngine().generate(
         args.argument, args.stance, args.format, args.style,
         length=args.length, cite_format=args.cite_format,
-        fallacy=not args.no_fallacy, mode=args.mode)
+        fallacy=not args.no_fallacy, mode=args.mode, center=args.center)
     dt = time.perf_counter() - t0
     print(f"\n=== 反驳（{result['provider']} · {args.format}/{args.style} · "
           f"{dt:.1f}s）===\n")
@@ -170,7 +170,8 @@ def cmd_rebut(args) -> int:
 def cmd_search(args) -> int:
     from engine.reranker import RetrievalChain
     config.ensure_dirs()
-    r = RetrievalChain().run(args.query, args.stance, mode=args.mode)
+    r = RetrievalChain().run(args.query, args.stance, mode=args.mode,
+                             center=args.center)
     print(f"检索 {args.query!r} · 立场 {args.stance} · "
           f"{r['retrieval_ms']}ms · 排除 {len(r['route']['excluded'])} 篇")
     if not r["chunks"]:
@@ -301,6 +302,24 @@ def cmd_migrate(_args) -> int:
     return 0
 
 
+def cmd_reassign(args) -> int:
+    """手动改立场（项目9）：六处数据同步。"""
+    from ingestion.indexer import Indexer
+    config.ensure_dirs()
+    try:
+        r = Indexer().reassign_stance(args.doc_id, args.stance)
+    except ValueError as e:
+        print(f"失败: {e}")
+        return 1
+    if not r["moved"] and r.get("old_stance") is None:
+        print(f"立场未变: {args.doc_id} 已是 {args.stance}")
+    else:
+        print(f"已改立场: {args.doc_id}  {r.get('old_stance', '?')} -> {r['stance']}")
+        for m in r["moved"]:
+            print(f"  移动: {m}")
+    return 0
+
+
 _ENV_KEY_NAMES = {"groq": "GROQ_API_KEY", "gemini": "GEMINI_API_KEY",
                   "cerebras": "CEREBRAS_API_KEY",
                   "mistral": "MISTRAL_API_KEY",
@@ -377,6 +396,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--mode", default="hybrid",
                     choices=["keyword", "semantic", "hybrid", "smart"],
                     help="检索模式")
+    sp.add_argument("--center", default=None,
+                    help="中心点预设键名（见 centers.md，默认无偏移）")
     sp.set_defaults(fn=cmd_rebut)
 
     sp = sub.add_parser("search", help="搜索知识库")
@@ -385,6 +406,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--mode", default="hybrid",
                     choices=["keyword", "semantic", "hybrid", "smart"],
                     help="搜索模式：关键词/语义/混合/智能改写")
+    sp.add_argument("--center", default=None,
+                    help="中心点预设键名（见 centers.md）")
     sp.set_defaults(fn=cmd_search)
 
     sp = sub.add_parser("eval", help="质量评估")
@@ -395,6 +418,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("delete", help="删除文档（级联）")
     sp.add_argument("doc_id")
     sp.set_defaults(fn=cmd_delete)
+
+    sp = sub.add_parser("reassign", help="手动改立场（六处同步）")
+    sp.add_argument("doc_id")
+    sp.add_argument("stance")
+    sp.set_defaults(fn=cmd_reassign)
 
     sp = sub.add_parser("health", help="依赖健康检查")
     sp.set_defaults(fn=cmd_health)

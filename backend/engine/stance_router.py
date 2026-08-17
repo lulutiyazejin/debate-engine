@@ -24,7 +24,11 @@ COORD_NEAR_DIST = 6.0  # 9轴欧氏距离阈值
 def _doc_coords(doc: dict) -> dict | None:
     try:
         prov = json.loads(doc.get("provenance") or "{}")
-        return prov.get("coordinates") or None
+        coords = prov.get("coordinates") or {}
+        # 只保留数值轴（过滤 low_confidence_axes 等标记键，项目10）
+        coords = {k: v for k, v in coords.items()
+                  if isinstance(v, (int, float))}
+        return coords or None
     except json.JSONDecodeError:
         return None
 

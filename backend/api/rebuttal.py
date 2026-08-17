@@ -28,6 +28,7 @@ class RebuttalRequest(BaseModel):
     fallacy: bool = True
     mode: str = Field(default="hybrid",
                       pattern="^(keyword|semantic|hybrid|smart)$")
+    center: str | None = None
 
 
 @router.get("/rebuttal/options")
@@ -51,7 +52,7 @@ def rebuttal(req: RebuttalRequest):
         raise HTTPException(422, f"未知风格 {req.style}，可选: {list(styles)}")
     engine = get_engine()
     kw = dict(length=req.length, cite_format=req.cite_format,
-              fallacy=req.fallacy, mode=req.mode)
+              fallacy=req.fallacy, mode=req.mode, center=req.center)
     if not req.stream:
         return engine.generate(req.argument, req.stance, req.format,
                                req.style, **kw)

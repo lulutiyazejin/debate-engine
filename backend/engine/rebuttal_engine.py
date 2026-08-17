@@ -168,13 +168,14 @@ class RebuttalEngine:
                  length: int | None = None,
                  cite_format: str = "plain",
                  fallacy: bool = True,
-                 mode: str = "hybrid") -> dict:
+                 mode: str = "hybrid",
+                 center: str | None = None) -> dict:
         """完整链路：检索 → 谬误检测 → 组装 → 生成 → 引用验证（失败重试一次）。"""
         if length is not None and (length < 20 or length > MAX_LENGTH):
             raise ValueError(f"字数参数超出范围（20-{MAX_LENGTH}）: {length}")
         trace_id = trace_id or new_trace_id()
         r = self.chain.run(argument, stance, style=style, trace_id=trace_id,
-                           mode=mode)
+                           mode=mode, center=center)
         citations = build_citations(r["chunks"], self.db)
         fallacies = detect_fallacies(argument, router=self.router,
                                      trace_id=trace_id) if fallacy else []
@@ -243,12 +244,13 @@ class RebuttalEngine:
                         length: int | None = None,
                         cite_format: str = "plain",
                         fallacy: bool = True,
-                        mode: str = "hybrid"
+                        mode: str = "hybrid",
+                        center: str | None = None
                         ) -> Generator[dict, None, None]:
         """SSE 流式：先推送 meta，再分片推送正文，最后推送 citations。"""
         result = self.generate(argument, stance, fmt, style, trace_id,
                                length=length, cite_format=cite_format,
-                               fallacy=fallacy, mode=mode)
+                               fallacy=fallacy, mode=mode, center=center)
         yield {"event": "meta",
                "data": {"trace_id": result["trace_id"],
                         "provider": result["provider"],

@@ -160,6 +160,37 @@ class SkillLoader:
             self._cache["styles"] = out  # type: ignore[assignment]
         return self._cache["styles"]  # type: ignore[return-value]
 
+    def centers(self, reload: bool = False) -> dict[str, dict]:
+        """centers.md → {键名: {label, coords, note}}（项目10 中心点预设）。"""
+        if reload or "centers" not in self._cache:
+            import json as _json
+            p = self.root / "centers.md"
+            out: dict[str, dict] = {}
+            if p.exists():
+                text = p.read_text(encoding="utf-8")
+                if not _check_injection(text):
+                    sk = parse_skill_md(p)
+                    for head, body in sk.sections.items():
+                        parts = head.split(None, 1)
+                        key = parts[0]
+                        label = parts[1] if len(parts) > 1 else key
+                        coords: dict = {}
+                        note = ""
+                        for ln in body.splitlines():
+                            s = ln.strip()
+                            if s.startswith("coords:"):
+                                try:
+                                    coords = _json.loads(s[len("coords:"):].strip())
+                                except Exception:
+                                    coords = {}
+                            elif s.startswith("说明："):
+                                note = s[len("说明："):]
+                        if coords:
+                            out[key] = {"label": label, "coords": coords,
+                                        "note": note}
+            self._cache["centers"] = out  # type: ignore[assignment]
+        return self._cache["centers"]  # type: ignore[return-value]
+
 
 _loader: SkillLoader | None = None
 

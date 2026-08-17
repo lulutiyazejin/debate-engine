@@ -533,3 +533,12 @@ AI 分错立场后用户可改，六处数据同步；项目12 右键菜单直�
 - `cli.py`：rebut --length/--cite-format/--no-fallacy/--mode，输出尾部质量行+疑似谬误栏；search --mode；config 子命令（写 .env+热重载）
 - `api/rebuttal.py`：参数透传 + GET /api/rebuttal/options（供项目12 选择器）；`api/settings.py`（新建：GET providers 不回明文 / POST key / DELETE key）挂载 main.py
 - 修复：_FALLACY_PROMPT JSON 花括号未转义致 format KeyError；test_hallucination_retry 改 fallacy=False 保持原验证语义；修正工具容错引入的两处错字（道草人→稻草人、兑底→兜底）
+
+### 批 5（项目9 改立场 + 项目10 22轴坐标）—— 46 测试全绿，引擎侧项目 1-10 完成
+- `ingestion/indexer.py`：reassign_stance 六处同步（documents.stance/meta.json 移动/标准化 .md 移动/INDEX 重生成/权重天然生效/reassign 日志）
+- `ingestion/classifier.py`：AXES 9→22（AXES_CORE+AXES_EXTENDED，两段提示词避免漏轴，两极语义逐轴对照 ARCH §16.1 表格）；扩展轴缺失补 0 + low_confidence_axes 随 coordinates 写入 meta.json
+- `knowledge_base/skills/centers.md`（新建）：§16.2 五预设 + 美国主流/欧盟主流，22 轴取值+一句说明（数值为编辑设定参考值，用户可改）；`skill_loader.py` centers() 加载
+- `engine/reranker.py`：_center_weight 中心点参照加权（近 +20% 远 -20%，默认无偏移），chain.run 加 center 参数
+- `engine/rebuttal_engine.py`：generate/generate_stream 透传 center
+- `cli.py`：reassign 子命令；rebut/search --center；`api/knowledge.py`：PATCH /docs/{id}/stance + GET /centers + search 加 mode/center/相关性；`api/rebuttal.py`：center 字段
+- 修复：low_confidence_axes 列表混入坐标致 StanceRouter float(list) 爆炸——_doc_coords 源头过滤非数值键；test_full_import 坐标断言 9→22 轴

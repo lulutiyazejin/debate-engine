@@ -17,8 +17,16 @@ from models.embedder import get_embedder
 from models.model_router import ModelRouter, get_router
 from storage.skill_loader import get_skill_loader
 
-AXES = ["ownership", "political_authority", "imperialism", "epistemology",
-        "change_speed", "ethics", "culture", "diplomacy", "technology"]
+AXES_CORE = ["ownership", "political_authority", "imperialism", "epistemology",
+             "change_speed", "ethics", "culture", "diplomacy", "technology"]
+
+# 0.1.1（项目10）：按架构 §16.1 补齐 13 轴（核心 9 轴必填，扩展尽力而为）
+AXES_EXTENDED = ["distribution", "welfare", "democracy_type", "organization",
+                 "constitutionalism", "identity", "gender", "secularism",
+                 "ontology", "ecology", "ai_automation", "globalization",
+                 "historical_view"]
+
+AXES = AXES_CORE + AXES_EXTENDED
 
 _IDEOLOGY_PROMPT = (
     "分析以下文档摘要的意识形态坐标。对每个轴输出 -5 到 +5 的整数：\n"
@@ -27,6 +35,19 @@ _IDEOLOGY_PROMPT = (
     "change_speed(-5革命 +5保守), ethics(-5结果主义 +5义务论), "
     "culture(-5进步 +5传统), diplomacy(-5民族 +5世界主义), "
     "technology(-5怀疑 +5加速主义)。\n"
+    "只输出 JSON 对象，键为轴名，值为整数。\n\n摘要：\n{summary}")
+
+# 扩展 13 轴单独一段提示词（分两段避免漏轴）；两极语义出自架构 §16.1
+_IDEOLOGY_EXT_PROMPT = (
+    "继续分析同一文档摘要的扩展意识形态坐标。对每个轴输出 -5 到 +5 的整数，"
+    "文本未涉及的轴可省略：\n"
+    "distribution(-5平均主义 +5绩效主义), welfare(-5强福利国家 +5自力更生), "
+    "democracy_type(-5直接民主 +5精英代议), organization(-5先锋党纪律 +5无政府自组织), "
+    "constitutionalism(-5人治/党治 +5宪政法治), identity(-5阶级政治优先 +5身份政治优先), "
+    "gender(-5父权传统 +5女权/性别流动), secularism(-5政教合一 +5彻底世俗), "
+    "ontology(-5整体主义 +5原子个人主义), ecology(-5生态中心/深绿 +5人类中心/发展优先), "
+    "ai_automation(-5技术恐惧 +5加速主义), globalization(-5反全球化 +5亲全球化), "
+    "historical_view(-5唯物决定论 +5观念/意志论)。\n"
     "只输出 JSON 对象，键为轴名，值为整数。\n\n摘要：\n{summary}")
 
 _CLASSIFY_PROMPT = (
@@ -47,20 +68,42 @@ def extract_json(text: str) -> dict:
 
 
 def extract_coordinates(summary: str, router: ModelRouter | None = None,
-                        trace_id: str | None = None) -> dict[str, int]:
-    """全书意识形态 9 轴坐标。解析失败时全 0。"""
+                        trace_id: str | None = None) -> dict:
+    """22 轴意识形态坐标（两段提示词避免漏轴）。
+
+    核心 9 轴解析失败补 0；扩展 13 轴缺失补 0 并记入 low_confidence_axes
+    （随 coordinates 写入 meta.json）。坐标任务走本地优先链（敏感内容）。"""
     r = router or get_router()
+    coords: dict = {}
+    low_conf: list[str] = []
+
     out, _ = r.run("ideology",
                    [{"role": "user",
                      "content": _IDEOLOGY_PROMPT.format(summary=summary[:3000])}],
                    trace_id=trace_id, max_tokens=300, temperature=0.1)
     data = extract_json(out)
-    coords = {}
-    for ax in AXES:
+    for ax in AXES_CORE:
         try:
             coords[ax] = max(-5, min(5, int(data.get(ax, 0))))
         except (TypeError, ValueError):
             coords[ax] = 0
+
+    out2, _ = r.run("ideology",
+                    [{"role": "user",
+                      "content": _IDEOLOGY_EXT_PROMPT.format(
+                          summary=summary[:3000])}],
+                    trace_id=trace_id, max_tokens=400, temperature=0.1)
+    data2 = extract_json(out2)
+    for ax in AXES_EXTENDED:
+        v = data2.get(ax)
+        try:
+            if v is None:
+                raise ValueError
+            coords[ax] = max(-5, min(5, int(v)))
+        except (TypeError, ValueError):
+            coords[ax] = 0
+            low_conf.append(ax)
+    coords["low_confidence_axes"] = low_conf
     return coords
 
 
