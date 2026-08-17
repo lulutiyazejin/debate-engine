@@ -1,4 +1,4 @@
-# 辩论引擎（Debate Engine）架构文档
+﻿# 辩论引擎（Debate Engine）架构文档
 
 > 版本：v0.3（用户交互层确认，2026-08-17）
 > 定位：带立场的本地 RAG 辩论辅助软件，独立桌面应用（Tauri + React），不依赖外部浏览器宿主。
@@ -52,8 +52,8 @@
 │                                                          │
 │  ┌──────────────┐  ┌──────────────┐  ┌───────────────┐  │
 │  │  向量检索     │  │  全文检索     │  │  立场过滤器   │  │
-│  │  ChromaDB    │  │  BM25        │  │  StanceFilter │  │
-│  │  BGE-M3 嵌入 │  │  rank_bm25   │  │               │  │
+│  │  LanceDB    │  │  SQLite FTS5 │  │  StanceFilter │  │
+│  │  BGE-M3 嵌入 │  │  jieba 分词  │  │               │  │
 │  └──────────────┘  └──────────────┘  └───────────────┘  │
 └────────────────────────────┬─────────────────────────────┘
                              │
@@ -71,7 +71,7 @@
 │    ├── inbox/            待分类暂存区                      │
 │    ├── INDEX.md          全局索引（自动维护）               │
 │    ├── skills/           立场 Skill 文件目录               │
-│    └── vector_store/     ChromaDB 数据目录                │
+│    └── vector_store/     LanceDB 数据目录（支持本地/S3）        │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -231,7 +231,7 @@ language: zh
 
 | 格式 | 解析库 | 特殊处理 |
 |------|-------|---------|
-| PDF | `pdfplumber` / `pymupdf` | 扫描版走 OCR（pytesseract） |
+| PDF | `Docling`（结构感知） | 保留标题层级/表格结构；扫描版备选 OCR |
 | Word (.docx) | `python-docx` | 保留标题层级用于结构分析 |
 | Excel (.xlsx) | `openpyxl` / `pandas` | 表格转自然语言描述 |
 | TXT | 直接读取 | 自动检测编码（chardet） |
@@ -246,7 +246,7 @@ language: zh
 ② 格式解析 → 提取纯文本 + 结构（标题/段落/引用）
         ↓
 ③ 文本分块（Chunking）
-   策略：按段落分块，每块 512 tokens，相邻块 128 tokens 重叠
+   策略：目录/标题边界优先，每块 ≤ 8K tokens；短文章不切割
         ↓
 ④ AI 预处理（调用 LLM）
    - 生成 200 字摘要
@@ -267,7 +267,7 @@ language: zh
    │ [✓ 确认]  [修改立场]  [多立场归档]   │
    └──────────────────────────────────────┘
         ↓
-⑦ 向量化（BGE-M3 嵌入）→ 写入 ChromaDB
+⑦ 向量化（BGE-M3 嵌入）→ 写入 SQLite（元数据+FTS5）+ LanceDB（向量）
 ⑧ 生成 meta.json + 标准化 .md
 ⑨ 归档原始文件到 source.*
 ⑩ 更新 INDEX.md
@@ -300,9 +300,9 @@ language: zh
         ↓
 ④ 混合检索（Hybrid Retrieval）
    阶段A - 粗检索：
-     向量检索（ChromaDB cosine）→ Top-20 候选块
-     BM25 全文检索              → Top-20 候选块
-     合并去重                   → Top-30
+     向量检索（LanceDB cosine）  → Top-20 候选块
+     SQLite FTS5 全文检索      → Top-20 候选块
+     RRF 融合排序                → Top-30
    
    阶段B - 立场精排（Reranking）：
      按 Skill 文件中的"检索偏好"调整权重
@@ -544,7 +544,7 @@ debate-engine-backend/
   ├── engine/
   │   ├── argument_parser.py   论点解析器
   │   ├── stance_router.py     立场路由器
-  │   ├── retriever.py         混合检索（ChromaDB + BM25）
+  │   ├── retriever.py         混合检索（LanceDB 向量 + SQLite FTS5）
   │   ├── reranker.py          立场精排
   │   └── rebuttal_engine.py   反驳生成器
   ├── ingestion/
@@ -556,7 +556,7 @@ debate-engine-backend/
   │   ├── classifier.py        立场自动分类
   │   └── indexer.py           向量化 + 入库 + INDEX.md 更新
   ├── models/
-  │   ├── llm_client.py        LLM API 统一适配层（OpenAI / Claude / Ollama）
+  │   ├── llm_client.py        LLM API 统一适配层（OpenAI / Groq / Gemini / Ollama）
   │   └── embedder.py          BGE-M3 嵌入模型（本地运行）
   ├── knowledge_base/          知识库数据目录（运行时）
   └── skills/                  Skill 文件目录

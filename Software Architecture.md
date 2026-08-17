@@ -217,7 +217,7 @@ knowledge_base/                # 知识库数据目录（运行时，用户管�
 | 向量数据库 | LanceDB（本地/S3 双模式） | ≥ 0.6 | int8 量化，原生 S3 备份 |
 | 元数据数据库 | SQLite + FTS5 + jieba 分词 | 内置 | sqlite-simple-tokenizer |
 | 文档解析 | Docling（IBM 开源） | ≥ 2.0 | 本地运行，结构感知 PDF 解析 |
-| 嵌入模型 | BGE-M3（本地，ONNX） | bge-m3 v1.5 | 768 维，中英双语，绑定版本号 |
+| 嵌入模型 | BGE-M3（本地，ONNX） | bge-m3 v1.5 | 1024 维，中英双语，绑定版本号 |
 | LLM 接口 | 统一 OpenAI 格式适配层 | — | Groq/Gemini/Cerebras/Ollama/自定义 |
 | 云备份同步 | Litestream（SQLite）+ LanceDB S3 | — | Cloudflare R2 推荐 |
 
