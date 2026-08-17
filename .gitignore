@@ -106,5 +106,5 @@ backend/*.spec
 backend/.venv/
 backend/venv/
 
-# ===== IDE \u5de5\u4f5c\u533a =====
+# ===== IDE 工作区 =====
 .aicoding-chat-workspace
