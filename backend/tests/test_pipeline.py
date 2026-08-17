@@ -57,13 +57,13 @@ class TestPipeline:
         calls = {"n": 0}
         import ingestion.indexer as indexer_mod
 
-        real = indexer_mod.summarize_chapter
+        real = indexer_mod.summarize_chapter_with_args
 
         def counting(*a, **kw):
             calls["n"] += 1
             return real(*a, **kw)
 
-        monkeypatch.setattr(indexer_mod, "summarize_chapter", counting)
+        monkeypatch.setattr(indexer_mod, "summarize_chapter_with_args", counting)
         idx.preview(str(src))  # 第二次：全部章节应跳过
         assert calls["n"] == 0
 

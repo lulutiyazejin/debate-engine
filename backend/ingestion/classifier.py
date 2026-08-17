@@ -84,8 +84,11 @@ def _vector_scores(summary: str) -> dict[str, float]:
 
 
 def classify_stance(summary: str, router: ModelRouter | None = None,
-                    trace_id: str | None = None) -> dict:
-    """立场分类：向量粗排 + LLM 复核。返回 {stance, confidence, reason, vector_scores}。"""
+                    trace_id: str | None = None,
+                    doc_type: str | None = None) -> dict:
+    """立场分类：向量粗排 + LLM 复核（入库 Skill 注入 system 段）。
+    返回 {stance, confidence, reason, vector_scores}。"""
+    from ingestion.summarizer import skill_system_messages
     vec_scores = _vector_scores(summary)
     candidates = sorted(vec_scores, key=vec_scores.get, reverse=True) or \
         ["liberal", "marxist", "conservative", "social_democracy", "empirical"]
@@ -93,6 +96,7 @@ def classify_stance(summary: str, router: ModelRouter | None = None,
     r = router or get_router()
     out, provider = r.run(
         "classify",
+        skill_system_messages(doc_type) +
         [{"role": "user",
           "content": _CLASSIFY_PROMPT.format(stances="、".join(candidates),
                                              summary=summary[:3000])}],

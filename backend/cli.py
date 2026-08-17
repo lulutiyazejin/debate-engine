@@ -44,7 +44,7 @@ def _collect_sources(inputs: list[str]) -> tuple[list[str], list[str]]:
 def _import_single(idx, source: str, args) -> int:
     """单文件：交互确认立场 + 查重提示。"""
     print(f"解析并分析中: {source}")
-    pv = idx.preview(source)
+    pv = idx.preview(source, strategy=args.summary_strategy)
     if pv.duplicate:
         dup = pv.duplicate
         kind = {"exact": "完全重复", "new_version": "检测到新版本",
@@ -55,7 +55,7 @@ def _import_single(idx, source: str, args) -> int:
             idx.delete_document(dup["existing_doc_id"])
             print(f"  已删除旧版 {dup['existing_doc_id']}")
             if dup["type"] == "exact":
-                pv = idx.preview(source)   # 补跑完整分析
+                pv = idx.preview(source, strategy=args.summary_strategy)   # 补跑完整分析
         elif dup["type"] == "exact":
             print("  已跳过（--on-duplicate replace 可替换重入）")
             return 0
@@ -115,7 +115,8 @@ def cmd_import(args) -> int:
         try:
             r = idx.import_document(s, stance=args.stance,
                                     on_duplicate=args.on_duplicate,
-                                    parsed=est["parsed"])
+                                    parsed=est["parsed"],
+                                    strategy=args.summary_strategy)
             if r.get("skipped"):
                 skipped.append((s, r["skipped"]))
                 print(f"  - 跳过 {est['title']}（{r['skipped']}）")
@@ -309,6 +310,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--on-duplicate", dest="on_duplicate", default="skip",
                     choices=["skip", "replace", "keep-both"],
                     help="重复处置：跳过/替换旧版/两版共存")
+    sp.add_argument("--summary-strategy", dest="summary_strategy",
+                    default="auto",
+                    choices=["auto", "map_reduce", "refine", "full_context"],
+                    help="全书摘要策略（auto=小文档整书投喂，超限回落 Map-Reduce）")
     sp.set_defaults(fn=cmd_import)
 
     sp = sub.add_parser("rebut", help="生成反驳")

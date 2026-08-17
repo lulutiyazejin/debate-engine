@@ -90,6 +90,11 @@ RRF_K = 60                    # RRF 融合常数
 CHUNK_MAX_TOKENS = 8000       # 单块上限
 SHORT_DOC_TOKENS = 2000       # 短文章阈值（不切割）
 
+# ---------- 摘要策略（项目5） ----------
+# auto 策略下：文档总 token 低于此阈值整书投喂（大窗口模型如 Gemini），
+# 超限自动回落 Map-Reduce
+FULL_CONTEXT_TOKEN_LIMIT = int(os.getenv("FULL_CONTEXT_TOKEN_LIMIT", "80000"))
+
 # ---------- 服务 ----------
 API_HOST = os.getenv("API_HOST", "127.0.0.1")
 API_PORT = int(os.getenv("API_PORT", "7700"))

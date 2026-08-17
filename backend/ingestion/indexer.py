@@ -26,7 +26,9 @@ from applog import Timer, log_ingestion, new_trace_id
 from ingestion.chunker import Chunk, chunk_document, estimate_tokens
 from ingestion.classifier import classify_stance, extract_coordinates
 from ingestion.parsers import ParsedDocument, parse_any
-from ingestion.summarizer import summarize_chapter, summarize_document
+from ingestion.summarizer import (pick_strategy, summarize_chapter_with_args,
+                                  summarize_document, summarize_full_context,
+                                  summarize_refine)
 from models.embedder import get_embedder
 from models.model_router import ModelRouter, get_router
 from storage.lance_store import VectorStoreBase, get_vector_store
@@ -48,6 +50,7 @@ class ImportPreview:
     token_estimate: int = 0
     content_hash: str = ""
     duplicate: dict | None = None
+    arg_units_by_chapter: list[list[dict]] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {"doc_id": self.doc_id, "trace_id": self.trace_id,
@@ -101,8 +104,10 @@ class Indexer:
 
     # ---------- Stage 0-6：预览 ----------
     def preview(self, source: str, trace_id: str | None = None,
-                parsed: ParsedDocument | None = None) -> ImportPreview:
-        """parsed 可由 estimate() 预传，避免批量导入时解析双跑。"""
+                parsed: ParsedDocument | None = None,
+                strategy: str = "auto") -> ImportPreview:
+        """parsed 可由 estimate() 预传，避免批量导入时解析双跑；
+        strategy: auto|map_reduce|refine|full_context（项目5）。"""
         trace_id = trace_id or new_trace_id()
 
         if parsed is None:
@@ -145,18 +150,27 @@ class Indexer:
                          "existing_doc_id": same_path["doc_id"],
                          "existing_title": same_path.get("title")}
 
-        # Stage 3 章节摘要（带断点：已 done 的章节从缓存复用）
+        # Stage 3 章节摘要 + 论证单元合并提取（带断点：已 done 从缓存复用）
         summaries: list[str] = []
+        arg_units_by_chapter: list[list[dict]] = []
         for i, ch in enumerate(chunks):
             chap_id = f"{doc_id}_ch{i:03d}"
             cached = self._load_cached_summary(doc_id, chap_id)
             if self._done(doc_id, chap_id, "summarized") and cached:
-                summaries.append(cached)
+                if isinstance(cached, dict):   # 0.1.1 缓存：{summary, arg_units}
+                    summaries.append(cached.get("summary", ""))
+                    arg_units_by_chapter.append(cached.get("arg_units", []))
+                else:                          # 0.1.0 旧缓存：纯文本
+                    summaries.append(cached)
+                    arg_units_by_chapter.append([])
                 continue
-            s = summarize_chapter(ch.chapter_title, ch.text,
-                                  router=self.router, trace_id=trace_id)
+            s, units = summarize_chapter_with_args(
+                ch.chapter_title, ch.text, router=self.router,
+                trace_id=trace_id, doc_type=parsed.source_type)
             summaries.append(s)
-            self._cache_summary(doc_id, chap_id, s)
+            arg_units_by_chapter.append(units)
+            self._cache_summary(doc_id, chap_id,
+                                {"summary": s, "arg_units": units})
             self._mark(doc_id, chap_id, "summarized")
         log_ingestion(trace_id, "stage_done", doc_id, stage="summarize",
                       status="done")
@@ -166,8 +180,18 @@ class Indexer:
         if self._done(doc_id, "__doc__", "doc_summary") and extras.get("doc_summary"):
             doc_summary = extras["doc_summary"]
         else:
-            doc_summary = summarize_document(summaries, router=self.router,
-                                             trace_id=trace_id) if summaries else ""
+            strat = pick_strategy(strategy, sum(c.token_count for c in chunks))
+            if strat == "full_context":
+                doc_summary = summarize_full_context(
+                    parsed.full_text, router=self.router, trace_id=trace_id)
+            elif strat == "refine":
+                doc_summary = summarize_refine(
+                    [(c.chapter_title, c.text) for c in chunks],
+                    router=self.router, trace_id=trace_id)
+            else:
+                doc_summary = summarize_document(
+                    summaries, router=self.router,
+                    trace_id=trace_id) if summaries else ""
             self._cache_doc_extra(doc_id, "doc_summary", doc_summary)
             self._mark(doc_id, "__doc__", "doc_summary")
         if self._done(doc_id, "__doc__", "coordinates") and extras.get("coordinates"):
@@ -184,7 +208,8 @@ class Indexer:
             cls = extras["classification"]
         else:
             cls = classify_stance(doc_summary or parsed.full_text[:2000],
-                                  router=self.router, trace_id=trace_id)
+                                  router=self.router, trace_id=trace_id,
+                                  doc_type=parsed.source_type)
             self._cache_doc_extra(doc_id, "classification", cls)
             self._mark(doc_id, "__doc__", "classified")
         log_ingestion(trace_id, "stage_done", doc_id, stage="classify",
@@ -199,7 +224,8 @@ class Indexer:
             parsed=parsed, chunks=chunks, chapter_summaries=summaries,
             doc_summary=doc_summary, coordinates=coords, classification=cls,
             token_estimate=sum(c.token_count for c in chunks),
-            content_hash=content_hash, duplicate=duplicate)
+            content_hash=content_hash, duplicate=duplicate,
+            arg_units_by_chapter=arg_units_by_chapter)
         PENDING[doc_id] = pv
         return pv
 
@@ -249,6 +275,24 @@ class Indexer:
         log_ingestion(trace_id, "stage_done", doc_id, stage="store",
                       status="done", chunks=n_chunks)
 
+        # Stage 7b 论证单元写入（chunk_id 回填，项目4；relation 留空供项目16）
+        n_units = 0
+        for i, units in enumerate(pv.arg_units_by_chapter):
+            cid = f"{doc_id}_c{i:04d}"
+            for u in units:
+                n_units += 1
+                self.db.insert_arg_unit({
+                    "arg_id": f"{doc_id}_a{n_units:04d}",
+                    "chunk_id": cid, "doc_id": doc_id,
+                    "claim": u.get("claim"), "evidence": u.get("evidence"),
+                    "logic_pattern": u.get("logic_pattern"),
+                    "thinker": u.get("thinker") or None,
+                    "school": u.get("school") or None,
+                    "coordinates": pv.coordinates})
+        if n_units:
+            log_ingestion(trace_id, "stage_done", doc_id, stage="arg_units",
+                          status="done", units=n_units)
+
         # Stage 8 meta.json
         stance_dir = config.STANCES_PATH / stance
         stance_dir.mkdir(parents=True, exist_ok=True)
@@ -266,6 +310,26 @@ class Indexer:
         meta_path = stance_dir / f"{doc_id}.meta.json"
         meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2),
                              encoding="utf-8")
+
+        # Stage 8b 标准化 Markdown（人可读入库产物，项目5）
+        md = ["---", f"title: {pv.parsed.title}",
+              f"author: {pv.parsed.author or ''}",
+              f"year: {pv.parsed.year or ''}", f"stance: {stance}",
+              f"coordinates: {json.dumps(pv.coordinates, ensure_ascii=False)}",
+              "---", "", "# 全书总结", "", pv.doc_summary or "（无）", "",
+              "# 章节摘要", ""]
+        for i, ch in enumerate(pv.chunks):
+            s = pv.chapter_summaries[i] if i < len(pv.chapter_summaries) else ""
+            md += [f"## {ch.chapter_title}", "", s, ""]
+        md += ["# 论证单元", ""]
+        for units in pv.arg_units_by_chapter:
+            for u in units:
+                who = "，".join(x for x in (u.get("thinker"), u.get("school")) if x)
+                md.append(f"- **{u.get('claim')}**"
+                          + (f"（{who}）" if who else "")
+                          + (f" 论据：{u.get('evidence')}" if u.get("evidence") else ""))
+        (stance_dir / f"{doc_id}.md").write_text("\n".join(md) + "\n",
+                                                 encoding="utf-8")
 
         # Stage 9 归档源文件
         src = Path(pv.source)
@@ -303,10 +367,11 @@ class Indexer:
         d.mkdir(parents=True, exist_ok=True)
         return d / f"{doc_id}.summaries.json"
 
-    def _cache_summary(self, doc_id: str, chap_id: str, text: str) -> None:
+    def _cache_summary(self, doc_id: str, chap_id: str, value) -> None:
+        """0.1.1：value 可为 str（旧）或 {summary, arg_units}（新）。"""
         p = self._summary_cache_path(doc_id)
         data = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
-        data[chap_id] = text
+        data[chap_id] = value
         p.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
 
     def _load_cached_summary(self, doc_id: str, chap_id: str) -> str | None:
@@ -350,16 +415,17 @@ class Indexer:
     # ---------- 一步式导入（CLI/批量用） ----------
     def import_document(self, source: str, stance: str | None = None,
                         on_duplicate: str = "skip",
-                        parsed: ParsedDocument | None = None) -> dict:
+                        parsed: ParsedDocument | None = None,
+                        strategy: str = "auto") -> dict:
         """on_duplicate: skip=静默跳过 / replace=删旧入新 / keep-both=两版共存。"""
-        pv = self.preview(source, parsed=parsed)
+        pv = self.preview(source, parsed=parsed, strategy=strategy)
         dup = pv.duplicate
         if dup:
             if on_duplicate == "replace":
                 self.delete_document(dup["existing_doc_id"])
                 if dup["type"] == "exact":
                     # exact 预览跳过了摘要/坐标/分类，删旧后补跑完整分析
-                    pv = self.preview(source, parsed=parsed)
+                    pv = self.preview(source, parsed=parsed, strategy=strategy)
             elif dup["type"] == "exact":
                 return {"doc_id": pv.doc_id, "skipped": "exact_duplicate",
                         "existing": dup["existing_doc_id"]}
@@ -385,6 +451,8 @@ class Indexer:
         counts["vectors"] = self.vec.delete_doc(doc_id)
         for meta in config.STANCES_PATH.glob(f"*/{doc_id}.meta.json"):
             meta.unlink()
+        for md in config.STANCES_PATH.glob(f"*/{doc_id}.md"):
+            md.unlink()   # 级联第六处：标准化 Markdown（项目5）
         cache = self._summary_cache_path(doc_id)
         if cache.exists():
             cache.unlink()

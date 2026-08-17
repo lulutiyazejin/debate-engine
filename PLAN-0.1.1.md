@@ -513,3 +513,12 @@ AI 分错立场后用户可改，六处数据同步；项目12 右键菜单直�
 - `cli.py`：import 支持多源/文件夹递归（SUPPORTED_EXTS 过滤）；批量流程：token 预估确认（--yes 跳过）→ 逐文件异常隔离 → 成功/跳过/失败三栏报告；--on-duplicate 参数；单文件保留交互确认+查重提示
 - `api/import_doc.py`：预览响应带 duplicate；confirm 支持 on_duplicate（exact 未选 replace 返 409）；POST /api/import/batch 后台批量 + GET /api/import/progress 进度轮询（供项目12 导入 UI）
 - `tests/test_pipeline.py`：新增 TestDedup（exact 跳过 / new_version 检测与 replace），共 46 条
+
+### 批 3（项目4 入库深度分析 + 项目5 标准化md/全文投喂）—— 46 测试全绿
+- `ingestion/summarizer.py`：skill_system_messages 按文档类型注入入库 Skill（excel→data_table，回退 default）；summarize_chapter_with_args 合并提取 {summary, arg_units[claim/evidence/logic_pattern/thinker/school]}，解析失败降级两次独立调用；Excel 先转述再分析；summarize_full_context + pick_strategy（auto 按 FULL_CONTEXT_TOKEN_LIMIT 判定）
+- `ingestion/classifier.py`：classify_stance 注入入库 Skill（doc_type 参数）
+- `ingestion/indexer.py`：Stage 3 改合并提取，缓存升级 {summary, arg_units}（兼容 0.1.0 纯文本旧缓存）；Stage 4 策略分支 auto/map_reduce/refine/full_context；Stage 7b 写 arg_units 表（chunk_id 回填，relation 留空供项目16）；Stage 8b 生成标准化 {stance}/{doc_id}.md（frontmatter+全书总结+章节摘要+论证单元）；删除级联第六处（.md）；preview/import_document 透传 strategy
+- `config.py`：FULL_CONTEXT_TOKEN_LIMIT（默认 80000，环境变量可调）
+- `cli.py`：--summary-strategy 参数；`api/import_doc.py`：ImportRequest/BatchRequest 加 summary_strategy
+- `knowledge_base/skills/ingestion/data_table.skill.md`（新建）
+- 修复：批〉编辑吃掉换行导致 SyntaxError（mkdir 行与 meta= 挤同行），复读定位修正；test_resume monkeypatch 目标改 summarize_chapter_with_args

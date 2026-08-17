@@ -23,6 +23,8 @@ BATCH_STATE: dict = {"running": False, "items": []}
 
 class ImportRequest(BaseModel):
     source: str = Field(min_length=1, description="文件路径或 URL")
+    summary_strategy: str = Field(default="auto",
+                                  pattern="^(auto|map_reduce|refine|full_context)$")
 
 
 class ConfirmRequest(BaseModel):
@@ -37,13 +39,15 @@ class BatchRequest(BaseModel):
     stance: str | None = None
     on_duplicate: str = Field(default="skip",
                               pattern="^(skip|replace|keep-both)$")
+    summary_strategy: str = Field(default="auto",
+                                  pattern="^(auto|map_reduce|refine|full_context)$")
 
 
 @router.post("/import")
 def import_preview(req: ImportRequest):
     """Stage 0-6：解析/摘要/坐标/立场推断，返回预览等待确认。"""
     try:
-        pv = get_indexer().preview(req.source)
+        pv = get_indexer().preview(req.source, strategy=req.summary_strategy)
     except FileNotFoundError:
         raise HTTPException(404, f"文件不存在: {req.source}")
     except ValueError as e:
@@ -75,7 +79,8 @@ def _run_batch(req: BatchRequest) -> None:
         item["status"] = "running"
         try:
             r = idx.import_document(item["source"], stance=req.stance,
-                                    on_duplicate=req.on_duplicate)
+                                    on_duplicate=req.on_duplicate,
+                                    strategy=req.summary_strategy)
             if r.get("skipped"):
                 item["status"], item["detail"] = "skipped", r["skipped"]
             else:
