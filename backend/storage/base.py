@@ -89,6 +89,11 @@ class VectorStoreBase(abc.ABC):
         ...
 
     @abc.abstractmethod
+    def export_doc(self, doc_id: str) -> list[dict]:
+        """导出文档全部向量（打包器用）：[{chunk_id, embedding_model, vector}]。"""
+        ...
+
+    @abc.abstractmethod
     def count(self) -> int: ...
 
 

@@ -1,5 +1,6 @@
-// 设置面板（项目13）：服务商 API Key 配置（不回显明文）+ 保存即热重载
+// 设置面板（项目13/14）：服务商 Key 配置 + 知识库导出/导入/备份
 import { useCallback, useEffect, useState } from "react";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { api } from "../api";
 
 interface Provider {
@@ -23,6 +24,47 @@ export default function SettingsPanel({ notify }: { notify: (msg: string) => voi
   const [editing, setEditing] = useState<string | null>(null);
   const [keyInput, setKeyInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [kbBusy, setKbBusy] = useState(false);
+
+  const exportKb = async () => {
+    const path = await save({
+      title: "导出知识库分享包",
+      defaultPath: "debate-kb.debkb",
+      filters: [{ name: "知识库包", extensions: ["debkb"] }],
+    });
+    if (!path) return;
+    setKbBusy(true);
+    try {
+      const r = await api.post<{ documents: number; size_bytes: number }>(
+        "/api/kb/export", { path, include_vectors: true });
+      notify(`导出完成：${r.documents} 文档，${(r.size_bytes / 1048576).toFixed(1)} MB`);
+    } catch (e) {
+      notify(`导出失败: ${e}`);
+    } finally {
+      setKbBusy(false);
+    }
+  };
+
+  const importKb = async () => {
+    const path = await open({
+      title: "选择知识库分享包",
+      filters: [{ name: "知识库包", extensions: ["debkb"] }],
+    });
+    if (!path) return;
+    setKbBusy(true);
+    try {
+      const m = await api.post<{ documents: number; embedding_model: string }>(
+        "/api/kb/verify", { path });
+      if (!window.confirm(`包内含 ${m.documents} 篇文档（嵌入模型 ${m.embedding_model}），合并入库？\n重复文档将跳过。`)) return;
+      const r = await api.post<{ imported: number; skipped: number; reembedded: number }>(
+        "/api/kb/import", { path, on_duplicate: "skip" });
+      notify(`合并完成：新入 ${r.imported}，跳过 ${r.skipped}，重嵌入 ${r.reembedded}`);
+    } catch (e) {
+      notify(`导入失败: ${e}`);
+    } finally {
+      setKbBusy(false);
+    }
+  };
 
   const refresh = useCallback(() => {
     api.get<{ providers: Provider[] }>("/api/config/providers")
@@ -97,6 +139,17 @@ export default function SettingsPanel({ notify }: { notify: (msg: string) => voi
             )}
           </div>
         ))}
+      </div>
+      <h3>知识库分享与备份</h3>
+      <p className="muted small">
+        导出包含：文档元数据、全部分块文本、向量、知识文件；
+        <b>强制剥离日志与 API Key</b>。备份可直接导出到网盘同步文件夹。
+        接收方嵌入模型版本不一致时，用包内文本自动重建向量。
+      </p>
+      <div className="controls">
+        <button className="primary" disabled={kbBusy} onClick={exportKb}>导出全库…</button>
+        <button disabled={kbBusy} onClick={importKb}>导入分享包…</button>
+        {kbBusy && <span className="muted small">处理中…</span>}
       </div>
       <h3>知识文件</h3>
       <p className="muted small">

@@ -18,7 +18,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import config
-from api import diagnostics, import_doc, knowledge, rebuttal, settings, stances
+from api import (diagnostics, import_doc, kb_package, knowledge, rebuttal,
+                 settings, stances)
 from applog import log_system
 
 
@@ -38,6 +39,7 @@ app.include_router(rebuttal.router)
 app.include_router(import_doc.router)
 app.include_router(knowledge.router)
 app.include_router(settings.router)
+app.include_router(kb_package.router)
 app.include_router(stances.router)
 app.include_router(diagnostics.router)
 

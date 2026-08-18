@@ -551,3 +551,10 @@ AI 分错立场后用户可改，六处数据同步；项目12 右键菜单直�
 - `ingestion/indexer.py`：collect_sources 共用件下沉（CLI 转发）；`api/import_doc.py`：批量端点文件夹自动展开 + 不支持格式预标 skipped + 预览拦目录 422
 - 修复（真机测试发现）：① 0.1.0 旧库升级炸——覆盖索引引用新列却先于列迁移执行，拆 _INDEXES 移到 _migrate 之后；② SqliteStore 丢了 check_same_thread=False，FastAPI 线程池跨线程用连接必炸；③ 立场字段 title 非 label，App 统一清洗下发
 - 真机验证（截图存证）：开窗零 cmd；三栏渲染；中文立场分组；反驳 E2E（离线兜底 813 字 + 1 引用 + 质量分）；点 X 关窗 → 引擎退出 + 握手文件清除
+
+### 批 8（项目14 知识库打包器）—— 50 测试全绿
+- `storage/packer.py`（新建）：debkb/1 格式（manifest + data.json 含必含分块文本 + vectors.npz 可选 + skills/）；白名单打包（logs/.env 结构上进不来）+ verify 黑名单断言双保险；导入合并：内容哈希查重 skip/replace、五表 + FTS 重建、嵌入模型匹配向量直入 / 漂移或缺向量时包内文本重嵌入
+- `storage/base.py` + `lance_store.py`：VectorStoreBase.export_doc 接口（两实现）
+- `api/kb_package.py`（新建）：POST /api/kb/export|verify|import；main.py 挂载；S3 直传与自动定时备份记后续债（备份到网盘同步目录已可用）
+- `desktop SettingsPanel`：导出全库（save 对话框）/ 导入分享包（verify 预检 + 确认 + 报告）
+- `tests/test_packer.py`（新建 4 测）：manifest 统计/隐私红线（产物零隐私 + 坏包拒收）/合并幂等查重/嵌入漂移重建

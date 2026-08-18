@@ -94,6 +94,16 @@ class LanceVectorStore(VectorStoreBase):
     def count(self):
         return self._table.count_rows() if self._table is not None else 0
 
+    def export_doc(self, doc_id):
+        """打包器用：导出文档全部向量行。"""
+        if self._table is None:
+            return []
+        return [{"chunk_id": r["chunk_id"],
+                 "embedding_model": r["embedding_model"],
+                 "vector": np.asarray(r["vector"], dtype=np.float32)}
+                for r in self._table.to_arrow().to_pylist()
+                if r["doc_id"] == doc_id]
+
 
 class NumpyVectorStore(VectorStoreBase):
     """降级实现：内存 + npz/json 持久化。接口与 LanceVectorStore 一致。"""
@@ -170,6 +180,14 @@ class NumpyVectorStore(VectorStoreBase):
 
     def count(self):
         return len(self.meta)
+
+    def export_doc(self, doc_id):
+        if self.vectors is None:
+            return []
+        return [{"chunk_id": m["chunk_id"],
+                 "embedding_model": m["embedding_model"],
+                 "vector": self.vectors[i]}
+                for i, m in enumerate(self.meta) if m["doc_id"] == doc_id]
 
 
 def get_vector_store(path: Path | str | None = None) -> VectorStoreBase:
