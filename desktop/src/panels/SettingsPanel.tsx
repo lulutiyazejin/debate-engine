@@ -1,6 +1,6 @@
 // 设置面板（项目13/14）：服务商 Key 配置 + 知识库导出/导入/备份
 import { useCallback, useEffect, useState } from "react";
-import { open, save } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "../api";
 
 interface Provider {
@@ -27,7 +27,7 @@ export default function SettingsPanel({ notify }: { notify: (msg: string) => voi
   const [kbBusy, setKbBusy] = useState(false);
 
   const exportKb = async () => {
-    const path = await save({
+    const path = await saveDialog({
       title: "导出知识库分享包",
       defaultPath: "debate-kb.debkb",
       filters: [{ name: "知识库包", extensions: ["debkb"] }],
@@ -46,7 +46,7 @@ export default function SettingsPanel({ notify }: { notify: (msg: string) => voi
   };
 
   const importKb = async () => {
-    const path = await open({
+    const path = await openDialog({
       title: "选择知识库分享包",
       filters: [{ name: "知识库包", extensions: ["debkb"] }],
     });

@@ -60,3 +60,20 @@ def import_kb(req: ImportRequest):
         return _packer().import_package(req.path, req.on_duplicate)
     except ValueError as e:
         raise HTTPException(422, str(e))
+
+
+class SaveTextRequest(BaseModel):
+    path: str = Field(min_length=1)
+    content: str = Field(min_length=1)
+
+
+@router.post("/save-text")
+def save_text(req: SaveTextRequest):
+    """把文本内容写到用户选定路径（报告 Markdown 导出等）。"""
+    p = Path(req.path)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(req.content, encoding="utf-8")
+    except OSError as e:
+        raise HTTPException(422, f"写入失败: {e}")
+    return {"path": str(p), "bytes": p.stat().st_size}

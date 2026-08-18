@@ -4,8 +4,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { api, waitEngine } from "./api";
+import ComparePanel from "./panels/ComparePanel";
+import GraphPanel from "./panels/GraphPanel";
 import ImportPanel from "./panels/ImportPanel";
 import RebutPanel from "./panels/RebutPanel";
+import { ReportPanel, TracePanel } from "./panels/ReportPanel";
 import SearchPanel from "./panels/SearchPanel";
 import SettingsPanel from "./panels/SettingsPanel";
 import "./styles.css";
@@ -172,9 +175,19 @@ function App() {
                        setRightOpen={setRightOpen} notify={notify} /> },
     { key: "import", label: "导入",
       el: <ImportPanel stances={stanceOpts} notify={notify} onDone={refreshDocs} /> },
+    { key: "compare", label: "对比",
+      el: <ComparePanel stances={stanceOpts} docs={docs} compareList={compareList}
+                        notify={notify} /> },
+    { key: "graph", label: "图谱",
+      el: <GraphPanel stances={stanceOpts} docs={docs} notify={notify}
+                      active={tab === "graph"} /> },
+    { key: "report", label: "报告",
+      el: <ReportPanel stances={stanceOpts} notify={notify} /> },
+    { key: "trace", label: "溯源",
+      el: <TracePanel notify={notify} /> },
     { key: "settings", label: "设置",
       el: <SettingsPanel notify={notify} /> },
-  ], [stanceOpts, docs, rebutPrefill, notify, refreshDocs]);
+  ], [stanceOpts, docs, rebutPrefill, compareList, tab, notify, refreshDocs]);
 
   if (!boot.ready) {
     return (

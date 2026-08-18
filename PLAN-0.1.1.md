@@ -558,3 +558,13 @@ AI 分错立场后用户可改，六处数据同步；项目12 右键菜单直�
 - `api/kb_package.py`（新建）：POST /api/kb/export|verify|import；main.py 挂载；S3 直传与自动定时备份记后续债（备份到网盘同步目录已可用）
 - `desktop SettingsPanel`：导出全库（save 对话框）/ 导入分享包（verify 预检 + 确认 + 报告）
 - `tests/test_packer.py`（新建 4 测）：manifest 统计/隐私红线（产物零隐私 + 坏包拒收）/合并幂等查重/嵌入漂移重建
+
+### 批 9+10（项目15 对齐引擎 + 项目16 图谱/URL + 项目17 报告/溯源）—— 57 测试全绿，真机验证通过
+- `engine/alignment.py`（新建）：对齐引擎共用基建——单元批量嵌入（claim+evidence，现算现用，向量持久化缓存记债）+ 相似度矩阵配对（每单元限配 3 次）+ LLM 轻量关系判定（离线降级规则法只标 similar 不下结论）；四消费者：分歧地图（同立场跨文档）/跨页对比（两文档或粘贴文本拆句）/关系边写回（relation/target_unit_id）/溯源（年代升序，库内=有据，离线无模型推测段）；graph_data 节点/三类边
+- `engine/report.py`（新建）：跨立场综合报告——estimate 预估 + 逐立场 RetrievalChain + 大汇总（四节固定结构）；只报有文档的立场；离线模式明确标注仅罗列检索结果
+- `storage/sqlite_store.py`：update_arg_relation / update_arg_unit（白名单字段）/ delete_arg_unit（清悬挂边）
+- `api/analysis.py`（新建）：divergence/compare/relations/build/graph/units 编辑删除/trace/report(+estimate)；`api/kb_package.py` 加 save-text（报告 Markdown 真落盘）
+- 桌面新增 4 tab（注册表追加）：对比（三模式：两文档/粘贴文本/分歧地图，右键收集清单一键填入）；图谱（react-force-graph-2d：绿支持/红攻击/蓝虚细化，立场/文档过滤，节点右键编辑/删除，生成关系边按钮）；报告（预估确认→生成→导出 md）；溯源（年代链 + 模型推测异色警示）
+- `tests/test_alignment.py`（新建 7 测）：确定性关键词嵌入器+关系判定桩；配对/离线降级/分歧地图/写边入图/编辑删除清悬挂/溯源年代序/拆句
+- 修复：SettingsPanel 导入 dialog save 与存 Key 函数同名遮蔽（TS 报错）→ 别名 saveDialog/openDialog
+- 真机验证：/api/analysis/graph 空库不炸；文本对比配对 1 组；报告预估识别 2 个有文档立场；8 tab 全部渲染（PrintWindow 定向截图，未打扰用户前台）；URL 入库复用 0.1.1 导入链（URL 输入框 + 批量端点已放行 http(s)）

@@ -290,6 +290,39 @@ class SqliteStore(MetadataStoreBase):
             rows = self.conn.execute("SELECT * FROM arg_units").fetchall()
         return [dict(r) for r in rows]
 
+    def update_arg_relation(self, arg_id: str, relation: str | None,
+                            target_unit_id: str | None) -> int:
+        """写回对齐引擎判定的关系边（项目16；None=清除）。"""
+        cur = self.conn.execute(
+            "UPDATE arg_units SET relation=?, target_unit_id=? WHERE arg_id=?",
+            (relation, target_unit_id, arg_id))
+        self.conn.commit()
+        return cur.rowcount
+
+    def update_arg_unit(self, arg_id: str, fields: dict) -> int:
+        """图谱人工纠错：只允许改白名单字段。"""
+        allowed = {k: v for k, v in fields.items()
+                   if k in ("claim", "evidence", "thinker", "school",
+                            "relation", "target_unit_id")}
+        if not allowed:
+            return 0
+        sets = ", ".join(f"{k}=?" for k in allowed)
+        cur = self.conn.execute(
+            f"UPDATE arg_units SET {sets} WHERE arg_id=?",
+            (*allowed.values(), arg_id))
+        self.conn.commit()
+        return cur.rowcount
+
+    def delete_arg_unit(self, arg_id: str) -> int:
+        """删单元并清掉指向它的关系边（避免悬挂引用）。"""
+        self.conn.execute(
+            "UPDATE arg_units SET relation=NULL, target_unit_id=NULL "
+            "WHERE target_unit_id=?", (arg_id,))
+        cur = self.conn.execute(
+            "DELETE FROM arg_units WHERE arg_id=?", (arg_id,))
+        self.conn.commit()
+        return cur.rowcount
+
     # ---------- 断点恢复 ----------
     def set_progress(self, doc_id: str, chapter_id: str, stage: str,
                      status: str) -> None:
