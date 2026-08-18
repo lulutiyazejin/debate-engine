@@ -47,6 +47,10 @@ export default function SettingsPanel({ notify, floatOn = true, setFloatOn }: Pr
   const [testing, setTesting] = useState("");
   const [params, setParams] = useState<Record<string, number>>({});
   const [cp, setCp] = useState({ name: "", url: "", key: "", model: "", tasks: [] as string[] });
+  const [modelOptions, setModelOptions] = useState<string[]>([]);
+  const [probing, setProbing] = useState(false);
+  const [overrideEdit, setOverrideEdit] = useState<string | null>(null);
+  const [overrideModel, setOverrideModel] = useState("");
   const [theme, setTheme] = useState<ThemePref>(getThemePref());
   const [gestureOn, setGestureOn] = useState(() => localStorage.getItem("de.gesture") !== "off");
   const [gestureInv, setGestureInv] = useState(() => localStorage.getItem("de.gesture.invert") === "1");
@@ -89,6 +93,33 @@ export default function SettingsPanel({ notify, floatOn = true, setFloatOn }: Pr
       const r = await api.post<{ ok: boolean; error?: string }>(`/api/config/test/${name}`, {});
       notify(r.ok ? `${name} 连通正常 ✓` : `${name} 测试失败：${r.error}`);
     } catch (e) { notify(`测试失败: ${e}`); } finally { setTesting(""); }
+  };
+
+  const probeModels = async () => {
+    if (!cp.url) { notify("先填 BaseURL 再拉取模型清单"); return; }
+    setProbing(true);
+    try {
+      const r = await api.post<{ ok: boolean; models: string[]; error?: string }>(
+        "/api/config/models-probe", { url: cp.url, key: cp.key });
+      if (r.ok && r.models.length) {
+        setModelOptions(r.models);
+        if (!cp.model) setCp({ ...cp, model: r.models[0] });
+        notify(`拉到 ${r.models.length} 个可选模型`);
+      } else {
+        setModelOptions([]);
+        notify(`拉取失败（可手动输入模型名）：${r.error || "无模型"}`);
+      }
+    } catch (e) { notify(`拉取失败: ${e}`); } finally { setProbing(false); }
+  };
+
+  const saveOverride = async (provider: string) => {
+    if (!overrideModel.trim()) return;
+    try {
+      await api.patch("/api/config/model-override",
+        { provider, model: overrideModel.trim() });
+      notify(`${provider} 默认模型已改为 ${overrideModel.trim()}（热生效）`);
+      setOverrideEdit(null); setOverrideModel(""); refresh();
+    } catch (e) { notify(`修改失败: ${e}`); }
   };
 
   const addCustom = async () => {
@@ -162,7 +193,21 @@ export default function SettingsPanel({ notify, floatOn = true, setFloatOn }: Pr
           {p.available ? "可用" : p.configured ? "已配置（暂不可用）" : "未配置"}
         </span>
       </div>
-      {p.model && <div className="muted small">默认模型：{p.model}</div>}
+      {p.model && <div className="muted small">默认模型：{p.model}
+        {overrideEdit === p.name ? (
+          <span className="controls" style={{ display: "inline-flex", marginLeft: 8 }}>
+            <input value={overrideModel} placeholder="新模型 ID"
+                   onChange={(e) => setOverrideModel(e.target.value)}
+                   onKeyDown={(e) => e.key === "Enter" && saveOverride(p.name)} />
+            <button className="primary" onClick={() => saveOverride(p.name)}>保存</button>
+            <button onClick={() => setOverrideEdit(null)}>取消</button>
+          </span>
+        ) : (
+          <button className="link" style={{ marginLeft: 8 }}
+                  onClick={() => { setOverrideEdit(p.name); setOverrideModel(p.model || ""); }}>
+            换模型</button>
+        )}
+      </div>}
       <div className="muted small">
         承担任务：{tasks.filter((t) => t.chain.includes(p.name))
           .map((t) => `${t.label}(第${t.chain.indexOf(p.name) + 1}位)`)
@@ -245,8 +290,13 @@ export default function SettingsPanel({ notify, floatOn = true, setFloatOn }: Pr
                        onChange={(e) => setCp({ ...cp, url: e.target.value })} />
                 <input placeholder="API Key（可空）" type="password" value={cp.key}
                        onChange={(e) => setCp({ ...cp, key: e.target.value })} />
-                <input placeholder="模型名" value={cp.model}
+                <input placeholder="模型名" value={cp.model} list="model-options"
                        onChange={(e) => setCp({ ...cp, model: e.target.value })} />
+                <button disabled={probing} onClick={probeModels}>
+                  {probing ? "拉取中…" : "拉取模型清单"}</button>
+                <datalist id="model-options">
+                  {modelOptions.map((m) => <option key={m} value={m} />)}
+                </datalist>
               </div>
               <div className="controls wrap">
                 <span className="muted small">加入任务链（插到首位）：</span>

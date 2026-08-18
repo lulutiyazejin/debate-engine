@@ -61,6 +61,16 @@ class Provider:
             try:
                 r = httpx.post(f"{self.base_url}/chat/completions",
                                headers=headers, json=payload, timeout=timeout)
+            except httpx.ConnectError as e:
+                # 证书审查代理环境：验证失败时降级不验证重试一次
+                if "SSL" in str(e) or "CERTIFICATE" in str(e).upper():
+                    r = httpx.post(f"{self.base_url}/chat/completions",
+                                   headers=headers, json=payload,
+                                   timeout=timeout, verify=False)
+                else:
+                    log_api_call(trace_id, task, self.name, self.model,
+                                 "network_error", t.ms, error=str(e))
+                    raise LLMError("other", f"{self.name} network: {e}") from e
             except httpx.TimeoutException as e:
                 log_api_call(trace_id, task, self.name, self.model,
                              "timeout", t.ms, error=str(e))
@@ -138,14 +148,15 @@ class OfflineProvider(Provider):
 
 
 def build_providers() -> dict[str, Provider]:
-    """按 config 构建所有服务商实例（含自定义）。"""
+    """按 config 构建所有服务商实例（含自定义与模型覆盖）。"""
     providers: dict[str, Provider] = {}
+    models = config.effective_provider_models()
     for name in ("groq", "gemini", "cerebras", "mistral", "openrouter"):
         providers[name] = Provider(name, config.PROVIDER_URLS[name],
                                    config.PROVIDER_KEYS.get(name, ""),
-                                   config.PROVIDER_MODELS[name])
+                                   models[name])
     providers["ollama"] = Provider("ollama", config.PROVIDER_URLS["ollama"],
-                                   "", config.PROVIDER_MODELS["ollama"])
+                                   "", models["ollama"])
     try:
         for c in config.effective_custom_providers():
             providers[c["name"]] = Provider(c["name"], c["url"],

@@ -211,3 +211,52 @@ def test_provider(provider: str):
         return {"provider": provider, "ok": True}
     except Exception as e:  # noqa: BLE001 测试端点要把失败原因带回给用户
         return {"provider": provider, "ok": False, "error": str(e)[:300]}
+
+
+class ModelsProbe(BaseModel):
+    url: str = Field(min_length=8, max_length=300)
+    key: str = ""
+
+
+@router.post("/config/models-probe")
+def models_probe(req: ModelsProbe):
+    """拉取 OpenAI 兼容服务商的可用模型清单（GET {url}/models），
+    供设置页下拉选择；失败时前端回退手动输入。"""
+    import httpx
+    url = req.url.rstrip("/")
+    headers = {"Authorization": f"Bearer {req.key}"} if req.key else {}
+    try:
+        try:
+            r = httpx.get(f"{url}/models", headers=headers, timeout=10.0)
+        except httpx.ConnectError as e:
+            if "SSL" not in str(e) and "CERTIFICATE" not in str(e).upper():
+                raise
+            r = httpx.get(f"{url}/models", headers=headers, timeout=10.0,
+                          verify=False)  # 证书审查代理环境降级
+        if r.status_code != 200:
+            return {"ok": False, "models": [],
+                    "error": f"HTTP {r.status_code}: {r.text[:120]}"}
+        data = r.json().get("data", [])
+        ids = sorted({m.get("id") for m in data if m.get("id")})
+        return {"ok": True, "models": list(ids)}
+    except Exception as e:  # noqa: BLE001 探测失败要带回原因
+        return {"ok": False, "models": [], "error": str(e)[:200]}
+
+
+class ModelOverride(BaseModel):
+    provider: str = Field(min_length=1)
+    model: str = Field(min_length=1, max_length=120)
+
+
+@router.patch("/config/model-override")
+def model_override(req: ModelOverride):
+    """内置服务商默认模型覆盖（写 settings.json + 热重建路由）。"""
+    if req.provider not in config.PROVIDER_MODELS:
+        raise HTTPException(422,
+                            f"未知内置服务商 {req.provider}，"
+                            f"可选: {list(config.PROVIDER_MODELS)}")
+    overrides = config.load_settings().get("provider_models") or {}
+    overrides[req.provider] = req.model
+    config.save_settings({"provider_models": overrides})
+    reset_router()
+    return {"provider": req.provider, "model": req.model}

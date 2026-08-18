@@ -159,6 +159,18 @@ def effective_task_chains() -> dict[str, list[str]]:
     return chains
 
 
+def effective_provider_models() -> dict[str, str]:
+    """模型覆盖：settings.json 的 provider_models 按服务商覆盖默认模型，
+    实现「想调哪个模型就调哪个」（内置与自定义均适用）。"""
+    s = load_settings()
+    models = dict(PROVIDER_MODELS)
+    if isinstance(s.get("provider_models"), dict):
+        for name, model in s["provider_models"].items():
+            if name in models and isinstance(model, str) and model.strip():
+                models[name] = model.strip()
+    return models
+
+
 apply_settings()
 
 
