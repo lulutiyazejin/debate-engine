@@ -568,3 +568,12 @@ AI 分错立场后用户可改，六处数据同步；项目12 右键菜单直�
 - `tests/test_alignment.py`（新建 7 测）：确定性关键词嵌入器+关系判定桩；配对/离线降级/分歧地图/写边入图/编辑删除清悬挂/溯源年代序/拆句
 - 修复：SettingsPanel 导入 dialog save 与存 Key 函数同名遮蔽（TS 报错）→ 别名 saveDialog/openDialog
 - 真机验证：/api/analysis/graph 空库不炸；文本对比配对 1 组；报告预估识别 2 个有文档立场；8 tab 全部渲染（PrintWindow 定向截图，未打扰用户前台）；URL 入库复用 0.1.1 导入链（URL 输入框 + 批量端点已放行 http(s)）
+
+### 批 11（项目18 收尾：文档/打包/上传）
+- `ARCH-debate-engine.md`：技术选型表更新（React 19/SQLite 服务器级 Schema/向量抽象双实现/force-graph）；§十一路线图重写：V1.1 单版本交付 18 项目全部打勾，V2.0/2.5/3.0 已入本版项目标注，未入本版记债（BGE-M3 管理/新手引导/QuotaBar/单元向量缓存）
+- `DebateEngine.spec`：补 collect_all('uvicorn')（serve 动态导入）；打包引擎冒烟：端口握手/health 0.1.1/优雅关停全通
+- `packaging/installer.nsi`：0.1.1 布局改造——主程序 = Tauri 壳（Debate Engine.exe），引擎藏 engine\ 子目录，PATH 指向 engine\（CLI 保留），快捷方式只指窗口程序（删 cmd 入口）；卸载数据保留勾选沿用；`安装说明.md` 改写为桌面版 8 功能页指南
+- 返工一次：首次安装包里 Tauri exe 是批 6+7 旧构建（只有 4 tab）→ 重跑 tauri build 嵌入新前端后重打
+- 安装包实测验收（静默安装 → 启动 → 截图 → 关闭）：8 tab 全在、立场中文清洗、引擎握手 7700、**可见 cmd 窗口 = 0**、关窗后引擎退出 + 端口文件清理
+- 行数扫描：仅 ingestion/indexer.py 526 行轻微越线（collect_sources 迁入所致）→ 记架构债不强拆；清理误提交的截图与 db-shm/wal，gitignore 补齐
+- 产物：release/DebateEngine-0.1.1-Setup.exe（~108MB）；推送 GitHub

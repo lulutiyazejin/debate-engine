@@ -1,6 +1,7 @@
-﻿; Debate Engine 0.1.0 NSIS 安装脚本
-; 编译：makensis installer.nsi → release\DebateEngine-0.1.0-Setup.exe
-; 规则：默认只打包 NSIS 安装包（单文件），参照 Software packaging.md
+﻿; Debate Engine 0.1.1 NSIS 安装脚本
+; 编译：makensis installer.nsi → release\DebateEngine-0.1.1-Setup.exe
+; 0.1.1 布局：主程序 = Tauri 窗口壳（Debate Engine.exe），引擎藏在 engine\ 子目录
+; 验收红线：全程无任何 cmd 窗口闪现（快捷方式只指向窗口程序）
 
 Unicode true
 !include "MUI2.nsh"
@@ -8,7 +9,7 @@ Unicode true
 
 !define APP_NAME "Debate Engine"
 !define APP_ID "DebateEngine"
-!define APP_VERSION "0.1.0"
+!define APP_VERSION "0.1.1"
 !define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_ID}"
 
 Name "${APP_NAME} ${APP_VERSION}"
@@ -109,8 +110,12 @@ Section "程序主体（必需）" SecMain
     SectionIn RO
     SetDetailsPrint both
     DetailPrint "正在复制程序文件..."
-    ; 程序主体（PyInstaller onedir 输出）
+    ; 窗口主程序（Tauri 壳，双击即用，零 cmd 窗口）
     SetOutPath "$INSTDIR"
+    File "/oname=Debate Engine.exe" "..\..\desktop\src-tauri\target\release\desktop.exe"
+
+    ; 引擎（PyInstaller onedir，壳以隐藏子进程拉起 engine\DebateEngine.exe serve）
+    SetOutPath "$INSTDIR\engine"
     File /r "..\dist\DebateEngine\*.*"
 
     ; 预置 Skill 文件（不覆盖用户已有知识库数据以外的部分）
@@ -133,39 +138,39 @@ Section "程序主体（必需）" SecMain
     WriteRegDWORD HKCU "${UNINST_KEY}" "NoModify" 1
     WriteRegDWORD HKCU "${UNINST_KEY}" "NoRepair" 1
 
-    ; 写入用户 PATH（不重复追加）
+    ; 写入用户 PATH（指向引擎目录，命令行用法保留；不重复追加）
     ReadRegStr $0 HKCU "Environment" "Path"
-    ${StrRep} $1 "$0" "$INSTDIR" ""
+    ${StrRep} $1 "$0" "$INSTDIR\engine" ""
     StrCmp $1 $0 0 path_done          ; 替换后无变化 = 尚未包含
     StrCmp $0 "" 0 path_append
-    WriteRegExpandStr HKCU "Environment" "Path" "$INSTDIR"
+    WriteRegExpandStr HKCU "Environment" "Path" "$INSTDIR\engine"
     Goto path_notify
     path_append:
-    WriteRegExpandStr HKCU "Environment" "Path" "$0;$INSTDIR"
+    WriteRegExpandStr HKCU "Environment" "Path" "$0;$INSTDIR\engine"
     path_notify:
     ; 广播超时压到 1 秒：无响应窗口逐个等 5 秒是安装 100% 后卡顿的主因
     SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=1000
     path_done:
 
-    ; 开始菜单快捷方式
+    ; 开始菜单快捷方式（只指向窗口程序，不建 cmd 入口）
     CreateDirectory "$SMPROGRAMS\${APP_NAME}"
-    CreateShortcut "$SMPROGRAMS\${APP_NAME}\DebateEngine 命令行.lnk" "$SYSDIR\cmd.exe" '/k "cd /d $INSTDIR"' "$INSTDIR\DebateEngine.exe" 0
+    CreateShortcut "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk" "$INSTDIR\Debate Engine.exe"
     CreateShortcut "$SMPROGRAMS\${APP_NAME}\使用说明.lnk" "$INSTDIR\使用说明.md"
     CreateShortcut "$SMPROGRAMS\${APP_NAME}\卸载 ${APP_NAME}.lnk" "$INSTDIR\Uninstall.exe"
 SectionEnd
 
 Section "创建桌面快捷方式" DesktopShortcuts
-    ; 直接指向主程序：无参数启动→交互模式（中文菜单、窗口常驻）
-    CreateShortcut "$DESKTOP\Debate Engine.lnk" "$INSTDIR\DebateEngine.exe"
+    ; 直接指向窗口主程序
+    CreateShortcut "$DESKTOP\Debate Engine.lnk" "$INSTDIR\Debate Engine.exe"
 SectionEnd
 
 ; ---------- 卸载（组件勾选页：程序必删，数据默认保留） ----------
 Section "un.卸载程序本体" UnSecMain
     SectionIn RO
-    ; 程序文件（2 万余个小文件，逐条打印避免看似卡死）
+    ; 程序文件（引擎上万个小文件，提示避免看似卡死）
     DetailPrint "正在删除程序文件，数量较多请稍候..."
-    RMDir /r "$INSTDIR\_internal"
-    Delete "$INSTDIR\DebateEngine.exe"
+    RMDir /r "$INSTDIR\engine"
+    Delete "$INSTDIR\Debate Engine.exe"
     Delete "$INSTDIR\.env.example"
     Delete "$INSTDIR\使用说明.md"
     Delete "$INSTDIR\Uninstall.exe"
@@ -173,9 +178,9 @@ Section "un.卸载程序本体" UnSecMain
     ; 移除 PATH 条目（三种位置形态）
     DetailPrint "正在清理环境变量..."
     ReadRegStr $0 HKCU "Environment" "Path"
-    ${StrRep} $1 "$0" ";$INSTDIR" ""
-    ${StrRep} $1 "$1" "$INSTDIR;" ""
-    ${StrRep} $1 "$1" "$INSTDIR" ""
+    ${StrRep} $1 "$0" ";$INSTDIR\engine" ""
+    ${StrRep} $1 "$1" "$INSTDIR\engine;" ""
+    ${StrRep} $1 "$1" "$INSTDIR\engine" ""
     WriteRegExpandStr HKCU "Environment" "Path" "$1"
     SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=1000
 
