@@ -108,3 +108,9 @@ backend/venv/
 
 # ===== IDE 工作区 =====
 .aicoding-chat-workspace
+
+smoke*.png
+desktop-smoke*.png
+knowledge_base/knowledge.db-shm
+knowledge_base/knowledge.db-wal
+knowledge_base/.engine_port
