@@ -21,7 +21,8 @@ class ModelRouter:
         self.providers = providers or build_providers()
 
     def _chain(self, task: str) -> list[str]:
-        return config.TASK_CHAINS.get(task, config.TASK_CHAINS["rebuttal"])
+        chains = config.effective_task_chains()
+        return chains.get(task, chains["rebuttal"])
 
     def run(self, task: str, messages: list[dict],
             trace_id: str | None = None, **kw) -> tuple[str, str]:

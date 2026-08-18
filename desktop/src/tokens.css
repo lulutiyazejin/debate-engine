@@ -1,0 +1,65 @@
+/* 视觉 token 层（PLAN-0.1.2 项目1/24）：呼吸感六原则 + 双主题色板。
+   所有面板/画布组件一律取 token，禁止硬编码色值。 */
+
+:root {
+  /* 间距阶：组内紧、组间松 */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 40px;
+  /* 字号阶 + 行高 */
+  --fs-12: 12px; --fs-13: 13px; --fs-15: 15px; --fs-18: 18px; --fs-24: 24px;
+  --lh: 1.65;
+  /* 动效常量（静止零动画；列表 stagger 40ms） */
+  --t-fast: 160ms; --t-move: 200ms;
+  /* 布局常量 */
+  --marginalia-w: 300px;
+  --float-reserve: 96px;   /* 右上悬浮组预留区 */
+  --content-max: 72ch;
+}
+
+/* 深色（默认）：灰阶为底 + 唯一强调色 + 立场低饱和色板 */
+:root, [data-theme="dark"] {
+  --bg-0: #101216;         /* 最底层 */
+  --bg-1: #16181d;         /* 面板 */
+  --bg-2: #1d2027;         /* 浮起一档 */
+  --bg-3: #262a33;         /* 悬停/选中 */
+  --bg-overlay: rgba(8, 9, 12, 0.72);
+  --tx-1: #e8e6e1;
+  --tx-2: #b3b0a8;
+  --tx-3: #7d7a72;
+  --tx-4: #55524b;
+  --hairline: rgba(232, 230, 225, 0.09);   /* 发丝线 */
+  --hairline-strong: rgba(232, 230, 225, 0.18);
+  --accent: #d3543f;       /* 唯一强调色落点 */
+  --accent-dim: rgba(211, 84, 63, 0.16);
+  --ok: #6a9955; --warn: #c8a24a; --err: #c65b53;
+  --stance-1: #7d9ec7; --stance-2: #c79e7d; --stance-3: #8fb08a;
+  --stance-4: #b08aa8; --stance-5: #9e948a; --stance-6: #7db3b0;
+  --canvas-bg: #14161b;    /* 图谱/时间轴/逻辑链画布底 */
+  --spec-dash: #c8a24a;    /* 模型推测（虚线异色） */
+}
+
+/* 浅色：纸感（纸灰 + 炭黑），报告出版风一致 */
+[data-theme="light"] {
+  --bg-0: #f5f3ee;
+  --bg-1: #efede6;
+  --bg-2: #e7e4db;
+  --bg-3: #dedacf;
+  --bg-overlay: rgba(58, 55, 48, 0.45);
+  --tx-1: #25231f;
+  --tx-2: #55524b;
+  --tx-3: #86816f;
+  --tx-4: #b0a998;
+  --hairline: rgba(37, 35, 31, 0.12);
+  --hairline-strong: rgba(37, 35, 31, 0.26);
+  --accent: #8a2422;
+  --accent-dim: rgba(138, 36, 34, 0.12);
+  --ok: #4a7a3a; --warn: #9a7a1e; --err: #a33c34;
+  --stance-1: #4a6d96; --stance-2: #96704a; --stance-3: #5c7f57;
+  --stance-4: #7f5775; --stance-5: #6d675f; --stance-6: #4a807d;
+  --canvas-bg: #eceade;
+  --spec-dash: #9a7a1e;
+}
+
+/* 动效降级：尊重系统减动效设置 */
+@media (prefers-reduced-motion: reduce) {
+  :root { --t-fast: 0ms; --t-move: 0ms; }
+}

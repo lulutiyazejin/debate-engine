@@ -14,15 +14,19 @@ interface Props {
   docs: DocRow[];
   compareList: DocRow[];
   notify: (msg: string) => void;
+  initialMode?: "docs" | "texts" | "divergence";
 }
 
 const REL_LABEL: Record<string, string> = {
   support: "支持", attack: "对立", refine: "细化",
+  evolve: "演进", analogy: "类比", oppose: "同题对立",
   similar: "论题相近", unrelated: "无关",
 };
 
-export default function ComparePanel({ stances, docs, compareList, notify }: Props) {
-  const [mode, setMode] = useState<"docs" | "texts" | "divergence">("docs");
+export default function ComparePanel({ stances, docs, compareList, notify,
+                                        initialMode }: Props) {
+  const [mode, setMode] = useState<"docs" | "texts" | "divergence">(
+    initialMode || "docs");
   const [docA, setDocA] = useState("");
   const [docB, setDocB] = useState("");
   const [textA, setTextA] = useState("");

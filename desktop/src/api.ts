@@ -77,6 +77,8 @@ export interface RebutRequest {
   mode: string;
   center?: string | null;
   stream: true;
+  intent?: string;               // rebut | critique | evaluate（0.1.2 项目16）
+  material_ids?: number[];       // 素材篮注入（0.1.2 项目18）
 }
 
 export interface SseEvent {

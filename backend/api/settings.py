@@ -86,3 +86,128 @@ def delete_key(provider: str):
     config.PROVIDER_KEYS[provider] = ""
     reset_router()
     return {"provider": provider, "configured": False}
+
+
+# ---------- 0.1.2 扩展（项目23）：任务链总览 / 自定义服务商 / 参数 / 连通测试 ----------
+
+# 任务用途说明（设置页「模型为了实现什么功能」）
+_TASK_LABELS = {"summarize": "文档摘要与入库整理",
+                "ideology": "22轴意识形态坐标分析",
+                "rebuttal": "反驳/批判/评价生成",
+                "parse": "对方论点结构解析",
+                "classify": "立场分类与关系判定"}
+
+
+@router.get("/config/tasks")
+def task_overview():
+    """任务分工总览：每任务的优先级链 + 当前实际落点（全不可用=离线兜底）。"""
+    r = get_router()
+    health = r.health()
+    chains = config.effective_task_chains()
+    out = []
+    for task, chain in chains.items():
+        active = next((n for n in chain
+                       if n in r.providers and health.get(n)), "offline")
+        out.append({"task": task, "label": _TASK_LABELS.get(task, task),
+                    "chain": chain, "active": active})
+    return {"tasks": out,
+            "all_offline": all(t["active"] == "offline" for t in out)}
+
+
+class CustomProvider(BaseModel):
+    name: str = Field(min_length=1, max_length=40,
+                      pattern="^[A-Za-z0-9_-]+$")
+    url: str = Field(min_length=8, max_length=300)
+    key: str = Field(default="", max_length=500)
+    model: str = Field(min_length=1, max_length=120)
+    tasks: list[str] = Field(default_factory=list)
+
+
+_BUILTIN_NAMES = set(_ENV_KEY_NAMES) | {"ollama", "offline"}
+
+
+@router.get("/config/custom-providers")
+def list_custom_providers():
+    """自定义服务商列表（Key 只回传是否已配置）。"""
+    return {"providers": [{**{k: c.get(k, "") for k in
+                              ("name", "url", "model")},
+                           "tasks": c.get("tasks") or [],
+                           "has_key": bool(c.get("key"))}
+                          for c in config.effective_custom_providers()]}
+
+
+@router.post("/config/custom-providers")
+def add_custom_provider(req: CustomProvider):
+    """新增/更新 OpenAI 兼容自定义服务商，写 settings.json + 热重建路由。
+    tasks 指定要加入哪些任务链（插到链首）。"""
+    if req.name in _BUILTIN_NAMES:
+        raise HTTPException(422, f"{req.name} 是内置服务商名，不可占用")
+    if not req.url.startswith(("http://", "https://")):
+        raise HTTPException(422, "BaseURL 必须以 http(s):// 开头")
+    provs = [c for c in config.effective_custom_providers()
+             if c.get("name") != req.name]
+    provs.append({"name": req.name, "url": req.url, "key": req.key,
+                  "model": req.model, "tasks": req.tasks})
+    s = config.load_settings()
+    chains = s.get("task_chains") or {}
+    for task in req.tasks:
+        if task in config.TASK_CHAINS:
+            base = chains.get(task) or list(config.TASK_CHAINS[task])
+            chains[task] = [req.name] + [n for n in base if n != req.name]
+    config.save_settings({"custom_providers": provs, "task_chains": chains})
+    reset_router()
+    return {"ok": True, "name": req.name}
+
+
+@router.delete("/config/custom-providers/{name}")
+def delete_custom_provider(name: str):
+    provs = config.effective_custom_providers()
+    kept = [c for c in provs if c.get("name") != name]
+    if len(kept) == len(provs):
+        raise HTTPException(404, "自定义服务商不存在")
+    s = config.load_settings()
+    chains = {t: [n for n in chain if n != name]
+              for t, chain in (s.get("task_chains") or {}).items()}
+    config.save_settings({"custom_providers": kept, "task_chains": chains})
+    reset_router()
+    return {"ok": True}
+
+
+class ParamsPatch(BaseModel):
+    retrieval_top_k: int | None = Field(default=None, ge=1, le=20)
+    retrieval_top_k_coarse: int | None = Field(default=None, ge=5, le=100)
+    full_context_token_limit: int | None = Field(default=None,
+                                                 ge=1000, le=500000)
+
+
+@router.get("/config/params")
+def get_params():
+    return {"retrieval_top_k": config.RETRIEVAL_TOP_K_FINAL,
+            "retrieval_top_k_coarse": config.RETRIEVAL_TOP_K_COARSE,
+            "full_context_token_limit": config.FULL_CONTEXT_TOKEN_LIMIT}
+
+
+@router.patch("/config/params")
+def patch_params(req: ParamsPatch):
+    """生成与检索参数：写 settings.json 并热生效（项目23-B）。"""
+    patch = {k: v for k, v in req.model_dump().items() if v is not None}
+    if not patch:
+        raise HTTPException(422, "没有要修改的参数")
+    config.save_settings(patch)
+    config.apply_settings()
+    return get_params()
+
+
+@router.post("/config/test/{provider}")
+def test_provider(provider: str):
+    """连通测试：真实发一条 1-token 请求，报可用/错误原因。"""
+    r = get_router()
+    p = r.providers.get(provider)
+    if p is None:
+        raise HTTPException(404, f"服务商 {provider} 不存在")
+    try:
+        p.chat([{"role": "user", "content": "ping"}], task="classify",
+               max_tokens=5, timeout=15.0)
+        return {"provider": provider, "ok": True}
+    except Exception as e:  # noqa: BLE001 测试端点要把失败原因带回给用户
+        return {"provider": provider, "ok": False, "error": str(e)[:300]}

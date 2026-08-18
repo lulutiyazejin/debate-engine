@@ -107,20 +107,38 @@ def build_citations(chunks: list[dict], db: SqliteStore) -> list[dict]:
     return cites
 
 
+# 回应意图（项目16：一级选择；analyze/report 走对齐与报告引擎，不在此表）
+INTENTS = {
+    "rebut": {"label": "反驳", "extra": "", "verb": "反驳"},
+    "critique": {"label": "批判", "verb": "批判",
+                 "extra": "任务改为「批判」：不必逐点驳斥结论，而是攻击对方论证"
+                          "结构本身——前提是否可靠、推理有无跳跃、概念是否偷换、"
+                          "证据与结论是否匹配；输出以对方论证的结构性缺陷清单收尾。"},
+    "evaluate": {"label": "评价", "verb": "评价",
+                 "extra": "任务改为「评价」：不站队攻击，做多立场权衡——分别列出"
+                          "该论点的合理之处与薄弱之处，引用资料分别佐证；"
+                          "不下唯一裁决，结尾给出条件式结论（在什么前提下成立/不成立）。"},
+}
+
+
 def build_prompt(argument: str, parsed: dict, citations: list[dict],
                  stance: str, fmt: str, style: str,
                  length: int | None = None,
-                 fallacies: list[dict] | None = None) -> list[dict]:
+                 fallacies: list[dict] | None = None,
+                 intent: str = "rebut") -> list[dict]:
     skill = get_skill_loader().get_stance(stance)
     sys_prompt = (skill.prompt_template if skill else
                   "你是一名理性辩手，基于提供的资料反驳对方论点。")
     styles = get_styles()
     style_prompt = styles.get(style, {}).get("prompt") or style
+    it = INTENTS.get(intent, INTENTS["rebut"])
     sys_prompt += (f"\n\n输出要求：{FORMATS.get(fmt, FORMATS['argument'])}；"
                    f"风格要点：{style_prompt}。\n"
                    "引用规则：只能使用下方资料的引用 ID（如 [C1]），"
                    "严禁编造任何未提供的作者、书名或数据。\n"
                    "写作自检：你的反驳自身不得犯稻草人、假因果、诉诸情感等逻辑谬误。")
+    if it["extra"]:
+        sys_prompt += f"\n{it['extra']}"
     if length:
         sys_prompt += f"\n篇幅要求：输出正文约 {length} 个汉字（允许±30%）。"
         if length <= 300:
@@ -141,8 +159,10 @@ def build_prompt(argument: str, parsed: dict, citations: list[dict],
             head += f"({c['year']})"
         if c["pages"]:
             head += f" {c['pages']}"
+        if c.get("must_use"):
+            head = f"★用户指定素材，必须引用 {head}"
         lines.append(f"{head}：{c['text'][:800]}")
-    lines += ["", "请生成反驳，引用只能使用以上资料的 [C编号]。"]
+    lines += ["", f"请生成{it['verb']}，引用只能使用以上资料的 [C编号]。"]
     return [{"role": "system", "content": sys_prompt},
             {"role": "user", "content": "\n".join(lines)}]
 
@@ -169,19 +189,32 @@ class RebuttalEngine:
                  cite_format: str = "plain",
                  fallacy: bool = True,
                  mode: str = "hybrid",
-                 center: str | None = None) -> dict:
-        """完整链路：检索 → 谬误检测 → 组装 → 生成 → 引用验证（失败重试一次）。"""
+                 center: str | None = None,
+                 intent: str = "rebut",
+                 materials: list[dict] | None = None) -> dict:
+        """完整链路：检索 → 谬误检测 → 组装 → 生成 → 引用验证（失败重试一次）。
+        intent=五意图之三（rebut/critique/evaluate）；materials=素材篮强制引用候选。"""
         if length is not None and (length < 20 or length > MAX_LENGTH):
             raise ValueError(f"字数参数超出范围（20-{MAX_LENGTH}）: {length}")
         trace_id = trace_id or new_trace_id()
         r = self.chain.run(argument, stance, style=style, trace_id=trace_id,
                            mode=mode, center=center)
         citations = build_citations(r["chunks"], self.db)
+        # 素材篮条目置顶为必用引用候选，与检索结果统一重编号（项目18）
+        if materials:
+            mats = [{"id": "", "chunk_id": str(m.get("ref_id") or ""),
+                     "doc_id": "basket", "author": m.get("source") or "素材篮",
+                     "title": "用户指定素材", "year": "", "pages": "",
+                     "text": (m.get("excerpt") or "")[:800], "must_use": True}
+                    for m in materials if m.get("excerpt")]
+            citations = mats + citations
+            for i, c in enumerate(citations, 1):
+                c["id"] = f"C{i}"
         fallacies = detect_fallacies(argument, router=self.router,
                                      trace_id=trace_id) if fallacy else []
         messages = build_prompt(argument, r["parsed_argument"], citations,
                                 stance, fmt, style, length=length,
-                                fallacies=fallacies)
+                                fallacies=fallacies, intent=intent)
 
         output, provider = self.router.run("rebuttal", messages,
                                            trace_id=trace_id, max_tokens=2000)
@@ -226,7 +259,7 @@ class RebuttalEngine:
 
         return {"trace_id": trace_id, "rebuttal": output,
                 "provider": provider, "stance": stance,
-                "format": fmt, "style": style,
+                "format": fmt, "style": style, "intent": intent,
                 "parsed_argument": r["parsed_argument"],
                 "detected_fallacies": fallacies,
                 "length_note": length_note,
@@ -245,12 +278,15 @@ class RebuttalEngine:
                         cite_format: str = "plain",
                         fallacy: bool = True,
                         mode: str = "hybrid",
-                        center: str | None = None
+                        center: str | None = None,
+                        intent: str = "rebut",
+                        materials: list[dict] | None = None
                         ) -> Generator[dict, None, None]:
         """SSE 流式：先推送 meta，再分片推送正文，最后推送 citations。"""
         result = self.generate(argument, stance, fmt, style, trace_id,
                                length=length, cite_format=cite_format,
-                               fallacy=fallacy, mode=mode, center=center)
+                               fallacy=fallacy, mode=mode, center=center,
+                               intent=intent, materials=materials)
         yield {"event": "meta",
                "data": {"trace_id": result["trace_id"],
                         "provider": result["provider"],

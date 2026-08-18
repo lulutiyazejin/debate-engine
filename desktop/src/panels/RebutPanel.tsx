@@ -18,13 +18,22 @@ interface Props {
   setSide: (v: { title: string; body: ReactNode } | null) => void;
   setRightOpen: (v: boolean) => void;
   notify: (msg: string) => void;
+  intent?: string;               // rebut | critique | evaluate（项目16）
+  materialIds?: number[];        // 素材篮强制引用（项目18）
+  onDone?: () => void;           // 生成完成（历史/素材角标刷新）
 }
 
 const MODE_LABELS: Record<string, string> = {
   keyword: "关键词", semantic: "语义", hybrid: "混合", smart: "智能",
 };
 
-export default function RebutPanel({ stances, prefill, setSide, setRightOpen, notify }: Props) {
+const INTENT_VERB: Record<string, string> = {
+  rebut: "反驳", critique: "批判", evaluate: "评价",
+};
+
+export default function RebutPanel({ stances, prefill, setSide, setRightOpen,
+                                     notify, intent = "rebut",
+                                     materialIds = [], onDone }: Props) {
   const [opts, setOpts] = useState<Options | null>(null);
   const [centers, setCenters] = useState<{ key: string; label: string }[]>([]);
   const [argument, setArgument] = useState("");
@@ -76,6 +85,7 @@ export default function RebutPanel({ stances, prefill, setSide, setRightOpen, no
         length: length ? Number(length) : null,
         cite_format: citeFmt, fallacy, mode,
         center: center || null, stream: true,
+        intent, material_ids: materialIds,
       }, (evt) => {
         if (evt.event === "meta") {
           setMeta({
@@ -114,6 +124,7 @@ export default function RebutPanel({ stances, prefill, setSide, setRightOpen, no
     } finally {
       setRunning(false);
       abortRef.current = null;
+      onDone?.();
     }
   };
 
@@ -173,7 +184,8 @@ export default function RebutPanel({ stances, prefill, setSide, setRightOpen, no
         </label>
         {running
           ? <button className="primary stop" onClick={stop}>停止</button>
-          : <button className="primary" onClick={run} disabled={!argument.trim()}>生成反驳（Ctrl+Enter）</button>}
+          : <button className="primary" onClick={run} disabled={!argument.trim()}>
+              生成{INTENT_VERB[intent] || "回应"}（Ctrl+Enter）</button>}
       </div>
 
       {demoStyle && (
@@ -191,7 +203,19 @@ export default function RebutPanel({ stances, prefill, setSide, setRightOpen, no
 
       <div className="output" ref={outRef}>
         {output
-          ? <pre className="md-preview">{output}</pre>
+          ? (() => {
+              // Glance 要点先行（项目17）：完成后首段大字，其余正常节奏
+              if (running) return <pre className="md-preview">{output}</pre>;
+              const cut = output.indexOf("\n\n");
+              const lead = cut > 0 ? output.slice(0, cut) : output;
+              const rest = cut > 0 ? output.slice(cut + 2) : "";
+              return (
+                <div className="glance">
+                  <div className="glance-lead">{lead}</div>
+                  {rest && <pre className="md-preview">{rest}</pre>}
+                </div>
+              );
+            })()
           : <div className="muted pad">{running ? "检索知识库并生成中…" : "生成结果显示在这里"}</div>}
       </div>
       {meta.provider && <div className="muted small pad-h">模型：{meta.provider}</div>}

@@ -83,6 +83,27 @@ CREATE TABLE IF NOT EXISTS ingestion_progress (
     status      TEXT,
     PRIMARY KEY (doc_id, chapter_id, stage)
 );
+CREATE TABLE IF NOT EXISTS basket (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_type   TEXT NOT NULL,          -- chunk | arg_unit | document
+    ref_id      TEXT NOT NULL,
+    excerpt     TEXT NOT NULL,
+    source      TEXT DEFAULT '',
+    used        INTEGER DEFAULT 0,
+    added_at    TEXT,
+    UNIQUE (item_type, ref_id)
+);
+CREATE TABLE IF NOT EXISTS responses (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    intent         TEXT NOT NULL,       -- rebut|critique|evaluate|analyze|report
+    stance         TEXT DEFAULT '',
+    input_text     TEXT NOT NULL,
+    output_text    TEXT NOT NULL,
+    citations_json TEXT DEFAULT '[]',
+    provider       TEXT DEFAULT '',
+    starred        INTEGER DEFAULT 0,
+    created_at     TEXT
+);
 """
 
 # 覆盖索引单独执行：必须在列迁移之后建（旧库先补列再建索引，
@@ -379,3 +400,67 @@ class SqliteStore(MetadataStoreBase):
             "chunks": q(f"SELECT COUNT(*) FROM chunks WHERE doc_id IN ({live})"),
             "arg_units": q(f"SELECT COUNT(*) FROM arg_units WHERE doc_id IN ({live})"),
         }
+
+    # ---------- 素材篮（项目18：跨面弹药通道，不入分享包） ----------
+    BASKET_CAP = 20
+
+    def basket_add(self, item_type: str, ref_id: str, excerpt: str,
+                   source: str = "") -> dict:
+        n = self.conn.execute("SELECT COUNT(*) FROM basket").fetchone()[0]
+        if n >= self.BASKET_CAP:
+            raise ValueError(f"素材篮已满（上限 {self.BASKET_CAP} 条），请先清理")
+        cur = self.conn.execute(
+            "INSERT OR IGNORE INTO basket(item_type, ref_id, excerpt, source, "
+            "added_at) VALUES (?,?,?,?,datetime('now','localtime'))",
+            (item_type, ref_id, excerpt[:800], source))
+        self.conn.commit()
+        return {"id": cur.lastrowid, "duplicated": cur.rowcount == 0}
+
+    def basket_list(self) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM basket ORDER BY id DESC").fetchall()
+        return [dict(r) for r in rows]
+
+    def basket_remove(self, item_id: int | None = None) -> int:
+        """指定 id 删单条；不传 = 清空。"""
+        if item_id is None:
+            cur = self.conn.execute("DELETE FROM basket")
+        else:
+            cur = self.conn.execute("DELETE FROM basket WHERE id=?", (item_id,))
+        self.conn.commit()
+        return cur.rowcount
+
+    def basket_mark_used(self, ids: list[int]) -> None:
+        self.conn.executemany("UPDATE basket SET used=1 WHERE id=?",
+                              [(i,) for i in ids])
+        self.conn.commit()
+
+    # ---------- 回应历史（项目19：五意图输出全记录，含收藏） ----------
+    def response_add(self, intent: str, input_text: str, output_text: str,
+                     citations_json: str = "[]", provider: str = "",
+                     stance: str = "") -> int:
+        cur = self.conn.execute(
+            "INSERT INTO responses(intent, stance, input_text, output_text, "
+            "citations_json, provider, created_at) "
+            "VALUES (?,?,?,?,?,?,datetime('now','localtime'))",
+            (intent, stance, input_text[:2000], output_text, citations_json,
+             provider))
+        self.conn.commit()
+        return cur.lastrowid
+
+    def response_list(self, limit: int = 100) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM responses ORDER BY starred DESC, id DESC LIMIT ?",
+            (limit,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def response_star(self, resp_id: int, starred: bool) -> int:
+        cur = self.conn.execute("UPDATE responses SET starred=? WHERE id=?",
+                                (1 if starred else 0, resp_id))
+        self.conn.commit()
+        return cur.rowcount
+
+    def response_delete(self, resp_id: int) -> int:
+        cur = self.conn.execute("DELETE FROM responses WHERE id=?", (resp_id,))
+        self.conn.commit()
+        return cur.rowcount

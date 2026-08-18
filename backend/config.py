@@ -14,7 +14,7 @@ except ImportError:
     pass
 
 # ---------- 版本（全局唯一来源，main/diagnostics/cli 均引用此处） ----------
-VERSION = "0.1.1"
+VERSION = "0.1.2"
 
 # ---------- 存储后端（服务器级抽象层：当前仅 sqlite，未来可插 postgres） ----------
 STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "sqlite")
@@ -98,6 +98,68 @@ FULL_CONTEXT_TOKEN_LIMIT = int(os.getenv("FULL_CONTEXT_TOKEN_LIMIT", "80000"))
 # ---------- 服务 ----------
 API_HOST = os.getenv("API_HOST", "127.0.0.1")
 API_PORT = int(os.getenv("API_PORT", "7700"))
+
+# ---------- settings.json 覆盖层（项目23：设置页可写配置，跟知识库走） ----------
+SETTINGS_PATH = KNOWLEDGE_BASE_PATH / "settings.json"
+
+# 设置页可调且热生效的参数白名单（键 → 本模块属性名）
+_TUNABLE = {"retrieval_top_k": "RETRIEVAL_TOP_K_FINAL",
+            "retrieval_top_k_coarse": "RETRIEVAL_TOP_K_COARSE",
+            "full_context_token_limit": "FULL_CONTEXT_TOKEN_LIMIT"}
+
+
+def load_settings() -> dict:
+    """读 settings.json（缺失/损坏回空 dict，不阻断启动）。"""
+    try:
+        import json
+        return json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def save_settings(patch: dict) -> dict:
+    """浅合并写回 settings.json，返回合并后全量。"""
+    import json
+    data = load_settings()
+    data.update(patch)
+    SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    SETTINGS_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2),
+                             encoding="utf-8")
+    return data
+
+
+def apply_settings() -> None:
+    """启动时/写入后调用：把 settings.json 的可调参数落到本模块属性。"""
+    s = load_settings()
+    for key, attr in _TUNABLE.items():
+        if isinstance(s.get(key), int) and s[key] > 0:
+            globals()[attr] = s[key]
+
+
+def effective_custom_providers() -> list[dict]:
+    """自定义服务商：settings.json 优先，其次环境变量 CUSTOM_PROVIDERS。"""
+    import json
+    s = load_settings()
+    if isinstance(s.get("custom_providers"), list):
+        return s["custom_providers"]
+    try:
+        return json.loads(CUSTOM_PROVIDERS_JSON)
+    except json.JSONDecodeError:
+        return []
+
+
+def effective_task_chains() -> dict[str, list[str]]:
+    """任务链：settings.json 的 task_chains 按任务覆盖默认表。"""
+    s = load_settings()
+    chains = dict(TASK_CHAINS)
+    if isinstance(s.get("task_chains"), dict):
+        for task, chain in s["task_chains"].items():
+            if task in chains and isinstance(chain, list) and chain:
+                chains[task] = [str(x) for x in chain]
+    return chains
+
+
+apply_settings()
 
 
 def reload_provider_keys() -> None:

@@ -147,10 +147,10 @@ def build_providers() -> dict[str, Provider]:
     providers["ollama"] = Provider("ollama", config.PROVIDER_URLS["ollama"],
                                    "", config.PROVIDER_MODELS["ollama"])
     try:
-        for c in json.loads(config.CUSTOM_PROVIDERS_JSON):
+        for c in config.effective_custom_providers():
             providers[c["name"]] = Provider(c["name"], c["url"],
                                             c.get("key", ""), c["model"])
-    except (json.JSONDecodeError, KeyError):
+    except (TypeError, KeyError):
         pass
     providers["offline"] = OfflineProvider()
     return providers

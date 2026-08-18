@@ -114,3 +114,5 @@ desktop-smoke*.png
 knowledge_base/knowledge.db-shm
 knowledge_base/knowledge.db-wal
 knowledge_base/.engine_port
+
+shot*.png

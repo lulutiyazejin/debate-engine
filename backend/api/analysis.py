@@ -64,8 +64,9 @@ class UnitPatch(BaseModel):
     evidence: str | None = None
     thinker: str | None = None
     school: str | None = None
-    relation: str | None = Field(default=None,
-                                 pattern="^(support|attack|refine)$")
+    relation: str | None = Field(
+        default=None,
+        pattern="^(support|attack|refine|evolve|analogy|oppose)$")
     target_unit_id: str | None = None
 
 
@@ -89,12 +90,26 @@ def delete_unit(arg_id: str):
 
 class TraceRequest(BaseModel):
     claim: str = Field(min_length=2, max_length=1000)
+    stance: str | None = None
+    year_from: int | None = None
+    year_to: int | None = None
 
 
 @router.post("/trace")
 def trace(req: TraceRequest):
     """论点溯源：库内对齐按年代排序（有据）+ 模型推测段（异色区分）。"""
-    return _align().trace(req.claim)
+    return _align().trace(req.claim, stance=req.stance,
+                          year_from=req.year_from, year_to=req.year_to)
+
+
+@router.get("/chain")
+def logic_chain(anchor: str, stance: str | None = None,
+                max_nodes: int = 12):
+    """逻辑链（项目14）：锚点 → 沿关系边提取论证主线（年代升序）。"""
+    if len(anchor.strip()) < 2:
+        raise HTTPException(422, "锚点至少 2 个字")
+    return _align().logic_chain(anchor.strip(), stance,
+                                max_nodes=min(max_nodes, 30))
 
 
 class ReportRequest(BaseModel):

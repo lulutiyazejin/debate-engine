@@ -57,12 +57,12 @@ class TestAlignment:
         assert {top["a"]["arg_id"], top["b"]["arg_id"]} == {"a1", "b1"}
 
     def test_offline_rule_fallback(self, align):
-        """离线路由：不下结论，只标 similar + 否定词提示。"""
+        """离线路由：否定词不对称 → 规则判「同题对立」（0.1.2 项目21）。"""
         j = align.classify_pair({"claim": "市场能配置资源", "doc_id": "x",
                                  "arg_id": "x1"},
                                 {"claim": "市场无法配置资源", "doc_id": "y",
                                  "arg_id": "y1"})
-        assert j["relation"] == "similar"
+        assert j["relation"] == "oppose"
         assert j["judged_by"] == "rule"
         assert "对立" in j["note"]
 
@@ -80,7 +80,8 @@ class TestAlignment:
         g = graph_data(db)
         assert len(g["nodes"]) == 3
         assert g["links"], "写回的关系边应出现在图谱数据中"
-        assert g["links"][0]["relation"] in ("support", "attack", "refine")
+        assert g["links"][0]["relation"] in (
+            "support", "attack", "refine", "evolve", "analogy", "oppose")
 
     def test_unit_edit_and_delete_clears_dangling(self, db):
         _args(db)

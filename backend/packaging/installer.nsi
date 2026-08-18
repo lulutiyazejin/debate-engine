@@ -1,6 +1,6 @@
-﻿; Debate Engine 0.1.1 NSIS 安装脚本
-; 编译：makensis installer.nsi → release\DebateEngine-0.1.1-Setup.exe
-; 0.1.1 布局：主程序 = Tauri 窗口壳（Debate Engine.exe），引擎藏在 engine\ 子目录
+﻿; Debate Engine 0.1.2 NSIS 安装脚本
+; 编译：makensis installer.nsi → release\DebateEngine-0.1.2-Setup.exe
+; 0.1.2 布局：主程序 = Tauri 窗口壳（Debate Engine.exe），引擎藏在 engine\ 子目录
 ; 验收红线：全程无任何 cmd 窗口闪现（快捷方式只指向窗口程序）
 
 Unicode true
@@ -9,7 +9,7 @@ Unicode true
 
 !define APP_NAME "Debate Engine"
 !define APP_ID "DebateEngine"
-!define APP_VERSION "0.1.1"
+!define APP_VERSION "0.1.2"
 !define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_ID}"
 
 Name "${APP_NAME} ${APP_VERSION}"
@@ -197,3 +197,4 @@ Section /o "un.同时删除知识库数据（已导入文档、索引与日志�
     RMDir /r "$INSTDIR\knowledge_base"
     RMDir "$INSTDIR"
 SectionEnd
+
