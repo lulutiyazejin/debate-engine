@@ -223,7 +223,9 @@ def models_probe(req: ModelsProbe):
     """拉取 OpenAI 兼容服务商的可用模型清单（GET {url}/models），
     供设置页下拉选择；失败时前端回退手动输入。"""
     import httpx
-    url = req.url.rstrip("/")
+    url = req.url.strip().rstrip("/")
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url   # 用户漏填协议时兜底
     headers = {"Authorization": f"Bearer {req.key}"} if req.key else {}
     try:
         try:
