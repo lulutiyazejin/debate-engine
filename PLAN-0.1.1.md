@@ -542,3 +542,12 @@ AI 分错立场后用户可改，六处数据同步；项目12 右键菜单直�
 - `engine/rebuttal_engine.py`：generate/generate_stream 透传 center
 - `cli.py`：reassign 子命令；rebut/search --center；`api/knowledge.py`：PATCH /docs/{id}/stance + GET /centers + search 加 mode/center/相关性；`api/rebuttal.py`：center 字段
 - 修复：low_confidence_axes 列表混入坐标致 StanceRouter float(list) 爆炸——_doc_coords 源头过滤非数值键；test_full_import 坐标断言 9→22 轴
+
+### 批 6+7（项目11 Tauri 框架 + 项目12 界面四件套 + 项目13 设置）—— 46 测试全绿，真机开窗验证通过
+- `desktop/`（新建 Tauri 2 + React 19 + Vite 工程）：
+  - `src-tauri/src/lib.rs`：引擎托管（CREATE_NO_WINDOW 隐藏子进程；开发态 venv python cli.py serve / 发布态 engine\DebateEngine.exe serve + KB_PATH 指安装目录）；.engine_port 握手；退出双保险（裸 TCP POST /api/shutdown → 3s 超时强杀）；单实例互斥（二次启动只聚焦）；engine_port/engine_alive 两个 Tauri 命令
+  - 前端：`api.ts`（握手轮询 + REST + 手工 SSE 解析）；`App.tsx` 三栏布局（左知识库树按立场分组/中可插拔 tab 注册表/右引用详情栏，左右可折叠）+ 注册式右键菜单（修改分类子菜单/用作反驳来源/加入对比/删除）；反驳面板（SSE 流式 + 谬误标注 + 反面演示警示 + 引用推右栏 + 质量分）；导入面板（Tauri 拖拽取路径 + 文件/文件夹选择器 + URL + 单文件确认卡 + 批量进度条三栏报告）；搜索面板（命中高亮/查看原文/用作来源）；设置面板（Key 不回显、保存即热重载）
+- `backend/main.py`：CORS + 端口自增 + .engine_port 就绪信号 + POST /api/shutdown + 父进程看门狗（壳崩溃时引擎 WaitForSingleObject 自杀防孤儿）
+- `ingestion/indexer.py`：collect_sources 共用件下沉（CLI 转发）；`api/import_doc.py`：批量端点文件夹自动展开 + 不支持格式预标 skipped + 预览拦目录 422
+- 修复（真机测试发现）：① 0.1.0 旧库升级炸——覆盖索引引用新列却先于列迁移执行，拆 _INDEXES 移到 _migrate 之后；② SqliteStore 丢了 check_same_thread=False，FastAPI 线程池跨线程用连接必炸；③ 立场字段 title 非 label，App 统一清洗下发
+- 真机验证（截图存证）：开窗零 cmd；三栏渲染；中文立场分组；反驳 E2E（离线兜底 813 字 + 1 引用 + 质量分）；点 X 关窗 → 引擎退出 + 握手文件清除

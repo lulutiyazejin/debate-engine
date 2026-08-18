@@ -83,6 +83,11 @@ CREATE TABLE IF NOT EXISTS ingestion_progress (
     status      TEXT,
     PRIMARY KEY (doc_id, chapter_id, stage)
 );
+"""
+
+# 覆盖索引单独执行：必须在列迁移之后建（旧库先补列再建索引，
+# 否则引用新列的索引在 0.1.0 旧库上直接报 no such column）
+_INDEXES = """
 CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(doc_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_chapter ON chunks(chapter_id);
 CREATE INDEX IF NOT EXISTS idx_chapters_doc ON chapters(doc_id);
@@ -103,6 +108,7 @@ _MIGRATIONS: list[tuple[str, str, str]] = [
     ("documents", "deleted_at", "TEXT"),
     ("chapters", "created_at", "TEXT"),
     ("chunks", "created_at", "TEXT"),
+    ("arg_units", "chunk_id", "TEXT"),
     ("arg_units", "evidence", "TEXT"),
     ("arg_units", "thinker", "TEXT"),
     ("arg_units", "school", "TEXT"),
@@ -121,13 +127,15 @@ class SqliteStore(MetadataStoreBase):
     def __init__(self, db_path: Path | str | None = None):
         self.path = Path(db_path) if db_path else config.SQLITE_PATH
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(str(self.path))
+        # check_same_thread=False：FastAPI 同步端点跑在线程池，连接需跨线程复用
+        self.conn = sqlite3.connect(str(self.path), check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         # 服务器级规范：WAL 并发模式 + 严格外键
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA foreign_keys=ON")
         self.conn.executescript(_SCHEMA)
         self._migrate()
+        self.conn.executescript(_INDEXES)
         self.conn.commit()
 
     def _migrate(self) -> None:

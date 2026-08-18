@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from api.deps import get_indexer
-from ingestion.indexer import PENDING
+from ingestion.indexer import PENDING, collect_sources
 
 router = APIRouter(prefix="/api", tags=["import"])
 
@@ -46,6 +46,8 @@ class BatchRequest(BaseModel):
 @router.post("/import")
 def import_preview(req: ImportRequest):
     """Stage 0-6：解析/摘要/坐标/立场推断，返回预览等待确认。"""
+    if Path(req.source).is_dir():
+        raise HTTPException(422, "来源是文件夹，请用批量导入接口 /api/import/batch")
     try:
         pv = get_indexer().preview(req.source, strategy=req.summary_strategy)
     except FileNotFoundError:
@@ -76,6 +78,8 @@ def import_confirm(req: ConfirmRequest):
 def _run_batch(req: BatchRequest) -> None:
     idx = get_indexer()
     for item in BATCH_STATE["items"]:
+        if item["status"] != "pending":
+            continue   # 不支持格式已标 skipped
         item["status"] = "running"
         try:
             r = idx.import_document(item["source"], stance=req.stance,
@@ -92,14 +96,19 @@ def _run_batch(req: BatchRequest) -> None:
 
 @router.post("/import/batch")
 def import_batch(req: BatchRequest, background_tasks: BackgroundTasks):
-    """批量导入（后台执行）：用 GET /api/import/progress 轮询进度。"""
+    """批量导入（后台执行）：文件夹自动展开；用 GET /api/import/progress 轮询进度。"""
     if BATCH_STATE["running"]:
         raise HTTPException(409, "已有批量导入进行中")
-    BATCH_STATE["items"] = [{"source": s, "status": "pending", "detail": None}
-                            for s in req.sources]
+    sources, unsupported = collect_sources(req.sources)
+    if not sources and not unsupported:
+        raise HTTPException(422, "没有可导入的文件")
+    BATCH_STATE["items"] = (
+        [{"source": s, "status": "pending", "detail": None} for s in sources]
+        + [{"source": s, "status": "skipped", "detail": "不支持的格式"}
+           for s in unsupported])
     BATCH_STATE["running"] = True
     background_tasks.add_task(_run_batch, req)
-    return {"accepted": len(req.sources)}
+    return {"accepted": len(sources), "unsupported": len(unsupported)}
 
 
 @router.get("/import/progress")

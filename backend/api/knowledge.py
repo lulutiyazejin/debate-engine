@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import config
 from api.deps import get_db, get_engine, get_indexer
 from storage.skill_loader import get_skill_loader
 
@@ -31,6 +32,20 @@ def reassign_stance(doc_id: str, req: StanceRequest):
         return get_indexer().reassign_stance(doc_id, req.stance)
     except ValueError as e:
         raise HTTPException(404, str(e))
+
+
+@router.get("/docs/{doc_id}/preview")
+def preview_doc(doc_id: str):
+    """标准化 .md 预览（项目12 知识库面板消费）。"""
+    doc = get_db().get_document(doc_id)
+    if doc is None:
+        raise HTTPException(404, f"文档不存在: {doc_id}")
+    for p in config.STANCES_PATH.glob(f"*/{doc_id}.md"):
+        return {"doc_id": doc_id, "markdown": p.read_text(encoding="utf-8")}
+    # 无标准化 md（0.1.0 旧数据）→ 用摘要兜底
+    return {"doc_id": doc_id,
+            "markdown": f"# {doc.get('title') or doc_id}\n\n"
+                        f"{doc.get('summary') or '（无摘要）'}"}
 
 
 @router.get("/centers")

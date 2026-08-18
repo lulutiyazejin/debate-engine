@@ -70,6 +70,29 @@ class ImportPreview:
 PENDING: dict[str, ImportPreview] = {}
 
 
+SUPPORTED_EXTS = {".pdf", ".docx", ".doc", ".xlsx", ".xls",
+                  ".txt", ".md", ".markdown"}
+
+
+def collect_sources(inputs: list[str]) -> tuple[list[str], list[str]]:
+    """展开目录为文件列表；返回 (可导入, 不支持的文件)。CLI 与批量 API 共用。"""
+    sources: list[str] = []
+    unsupported: list[str] = []
+    for s in inputs:
+        if s.lower().startswith(("http://", "https://")):
+            sources.append(s)
+            continue
+        p = Path(s)
+        if p.is_dir():
+            for f in sorted(p.rglob("*")):
+                if f.is_file():
+                    (sources if f.suffix.lower() in SUPPORTED_EXTS
+                     else unsupported).append(str(f))
+        else:
+            sources.append(s)
+    return sources, unsupported
+
+
 def _content_hash(source: str, parsed: ParsedDocument) -> str:
     """内容哈希：本地文件哈希字节；URL/无文件哈希解析后正文。
 

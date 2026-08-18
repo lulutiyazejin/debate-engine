@@ -18,27 +18,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import config
 
 
-SUPPORTED_EXTS = {".pdf", ".docx", ".doc", ".xlsx", ".xls",
-                  ".txt", ".md", ".markdown"}
-
-
 def _collect_sources(inputs: list[str]) -> tuple[list[str], list[str]]:
-    """展开目录为文件列表；返回 (可导入, 不支持的文件)。"""
-    sources: list[str] = []
-    unsupported: list[str] = []
-    for s in inputs:
-        if s.lower().startswith(("http://", "https://")):
-            sources.append(s)
-            continue
-        p = Path(s)
-        if p.is_dir():
-            for f in sorted(p.rglob("*")):
-                if f.is_file():
-                    (sources if f.suffix.lower() in SUPPORTED_EXTS
-                     else unsupported).append(str(f))
-        else:
-            sources.append(s)
-    return sources, unsupported
+    """共用件已下沉 indexer（批量 API 同消费），此处保留转发。"""
+    from ingestion.indexer import collect_sources
+    return collect_sources(inputs)
 
 
 def _import_single(idx, source: str, args) -> int:
@@ -355,9 +338,10 @@ def cmd_config(args) -> int:
 
 
 def cmd_serve(_args) -> int:
-    import uvicorn
-    from main import app
-    uvicorn.run(app, host=config.API_HOST, port=config.API_PORT)
+    from main import serve_forever
+    config.ensure_dirs()
+    print(f"启动 API 服务 http://{config.API_HOST}:{config.API_PORT}（占用时自动递增）")
+    serve_forever()
     return 0
 
 
