@@ -1,0 +1,11 @@
+- **触发时机**: 每次版本更新完成后自动执行 GitHub 上传（源码同步）；本地打包验证照做，但产物不入仓库。
+- **仓库名**: 取当前项目 git remote（如 `lulutiyazejin/debate-engine`）；标签格式：`v<version>`（例如 v0.1.3）。
+- **凭证安全**: 不在项目目录存储 token；使用环境变量 `CI_GITHUB_TOKEN` 或本地凭据管理器注入。
+- **上传内容**: **只传源码**（git push main + tag）；**软件本体不传**（安装包 exe/nsis/构建产物均不上资产）；Release 页只带版本变更说明。
+- **网络成功路径（实测有效，v0.1.3 验证）**:
+  - 不信 shell 的 HTTPS_PROXY 环境变量（可能指向死端口）；先查系统 IE 代理拿活端口（本机为 127.0.0.1:7890）。
+  - push：`git -c http.proxy=http://127.0.0.1:7890 push origin main`（tag 同）。
+  - 若用户明确要求传大文件资产：curl 必加 `-H "Expect:" --http1.1`（本机代理会吞 100-continue 的终响应，致资产卡 starter 态），传后回查 `state=uploaded` 才算成功。
+- **commit message 模板**: `[release] v<version> - automated upload to GitHub Releases`。
+- **操作权限**: 需要 write/release 权限以创建 Release；若权限不足则报错等待指示。
+

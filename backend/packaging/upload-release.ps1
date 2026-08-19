@@ -1,4 +1,7 @@
 ﻿# v0.1.3 GitHub Release 上传（AGENTS.md 发布规则：token 来自 CI_GITHUB_TOKEN 或本地凭据管理器，不落盘）
+# AGENTS.md（0.1.3 后修订）：默认只传源码（push+tag+Release 说明），软件本体不传；
+# 确需上传安装包时加 -WithInstaller。
+param([switch]$WithInstaller)
 $ErrorActionPreference = "Stop"
 $repo = "lulutiyazejin/debate-engine"
 $tag = "v0.1.3"
@@ -37,6 +40,9 @@ try {
     $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/tags/$tag" -Headers $H
 }
 "release id: $($rel.id)"
+
+# AGENTS.md 规定默认不传软件本体（只传源码）；确需安装包时加 -WithInstaller
+if (-not $WithInstaller) { "跳过资产上传（AGENTS.md：只传源码）"; exit 0 }
 
 # 4. 上传安装包 asset（同名旧 asset 先删；curl + 禁用 Expect:100-continue——
 #    本机代理会吞掉 100-continue 的终响应，导致 asset 卡 starter 态）
