@@ -18,6 +18,8 @@
 - 不诉诸纯粹的怀旧情绪
 - 不攻击对方人格
 
+method_blacklist: dialectical, immanent
+
 ## 知识库检索偏好
 - 优先检索: stances/conservative/
 - 交叉检索: stances/empirical/

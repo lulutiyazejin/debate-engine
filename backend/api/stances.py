@@ -39,6 +39,7 @@ def list_stances():
                     "default_style": skill.get("默认回复风格", "反驳"),
                     "doc_count": counts.get(name, 0),
                     "builtin": name in _BUILTIN_STANCES,
+                    "method_blacklist": skill.method_blacklist,   # 批 3：笔法兼容
                     "retrieval_prefs": skill.retrieval_prefs})
     return {"stances": out, "total_docs": len(docs)}
 

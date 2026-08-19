@@ -140,9 +140,15 @@ def build_prompt(argument: str, parsed: dict, citations: list[dict],
                  length: int | None = None,
                  fallacies: list[dict] | None = None,
                  intent: str = "rebut") -> list[dict]:
-    skill = get_skill_loader().get_stance(stance)
-    sys_prompt = (skill.prompt_template if skill else
-                  "你是一名理性辩手，基于提供的资料反驳对方论点。")
+    # 0.1.4 批 3：stance="none" = 不站队评价（stance_free 风格），跳过 skill 注入
+    if stance == "none":
+        skill = None
+        sys_prompt = ("你是一名不站队的理性评审，基于提供的资料对输入论点做多立场权衡，"
+                      "对各方论据一视同仁，不预设立场。")
+    else:
+        skill = get_skill_loader().get_stance(stance)
+        sys_prompt = (skill.prompt_template if skill else
+                      "你是一名理性辩手，基于提供的资料反驳对方论点。")
     styles = get_styles()
     style_prompt = styles.get(style, {}).get("prompt") or style
     it = INTENTS.get(intent, INTENTS["rebut"])
@@ -211,6 +217,10 @@ class RebuttalEngine:
         if length is not None and (length < 20 or length > MAX_LENGTH):
             raise ValueError(f"字数参数超出范围（20-{MAX_LENGTH}）: {length}")
         trace_id = trace_id or new_trace_id()
+        # 0.1.4 批 3 兜底（决策 16-E）：风格命中立场 method_blacklist → 回落默认笔法
+        _skill = get_skill_loader().get_stance(stance)
+        if _skill and style in _skill.method_blacklist:
+            style = "rebuttal"
         r = self.chain.run(argument, stance, style=style, trace_id=trace_id,
                            mode=mode, center=center)
         citations = build_citations(r["chunks"], self.db)

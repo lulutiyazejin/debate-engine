@@ -14,7 +14,7 @@ except ImportError:
     pass
 
 # ---------- 版本（全局唯一来源，main/diagnostics/cli 均引用此处） ----------
-VERSION = "0.1.3"
+VERSION = "0.1.4"
 
 # ---------- 存储后端（服务器级抽象层：当前仅 sqlite，未来可插 postgres） ----------
 STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "sqlite")
@@ -22,7 +22,31 @@ STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "sqlite")
 # ---------- 路径 ----------
 BACKEND_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BACKEND_DIR.parent
-KNOWLEDGE_BASE_PATH = Path(os.getenv("KB_PATH", PROJECT_ROOT / "knowledge_base"))
+
+
+def _data_root_override() -> Path | None:
+    """0.1.4 批 5（决策 2）：%APPDATA%\\DebateEngine\\data-root.txt 记迁移后数据根。
+    文件放数据目录之外，迁移不会把自己带走；无效路径忽略回默认。"""
+    try:
+        appdata = os.getenv("APPDATA")
+        if not appdata:
+            return None
+        marker = Path(appdata) / "DebateEngine" / "data-root.txt"
+        if not marker.exists():
+            return None
+        target = Path(marker.read_text(encoding="utf-8").strip())
+        if target.exists() and (target / "knowledge.db").exists():
+            return target
+    except Exception:
+        pass
+    return None
+
+
+DATA_ROOT_MARKER = (Path(os.getenv("APPDATA", str(PROJECT_ROOT)))
+                    / "DebateEngine" / "data-root.txt")
+KNOWLEDGE_BASE_PATH = (_data_root_override()
+                       or Path(os.getenv("KB_PATH",
+                                         PROJECT_ROOT / "knowledge_base")))
 SQLITE_PATH = Path(os.getenv("SQLITE_PATH", KNOWLEDGE_BASE_PATH / "knowledge.db"))
 LANCE_PATH = Path(os.getenv("LANCE_PATH", KNOWLEDGE_BASE_PATH / "vector_store"))
 SKILLS_PATH = KNOWLEDGE_BASE_PATH / "skills"
@@ -32,8 +56,30 @@ LOGS_PATH = KNOWLEDGE_BASE_PATH / "logs"
 SOURCE_FILES_PATH = KNOWLEDGE_BASE_PATH / "source_files"
 INDEX_MD_PATH = KNOWLEDGE_BASE_PATH / "INDEX.md"
 
-# ---------- 嵌入模型 ----------
-BGE_M3_PATH = Path(os.getenv("BGE_M3_PATH", PROJECT_ROOT / "models" / "bge-m3"))
+# ---------- 嵌入模型与组件中心（0.1.4 批 5 决策 11） ----------
+MODELS_DIR = KNOWLEDGE_BASE_PATH / "models"          # 组件中心下载的模型落数据根
+EXTRAS_PATH = BACKEND_DIR / "engine" / "_extras"     # python 组件包落盘目录
+_BGE_DL = MODELS_DIR / "bge-m3"
+BGE_M3_PATH = Path(os.getenv("BGE_M3_PATH",
+                             str(_BGE_DL if _BGE_DL.exists()
+                                 else PROJECT_ROOT / "models" / "bge-m3")))
+
+
+def mount_extras() -> list[str]:
+    """启动时把已安装且未禁用的组件包目录挂 sys.path（禁用= .disabled 标记）。"""
+    import sys as _sys
+    mounted: list[str] = []
+    try:
+        if EXTRAS_PATH.exists():
+            for d in EXTRAS_PATH.iterdir():
+                if d.is_dir() and not (d / ".disabled").exists():
+                    _sys.path.insert(0, str(d))
+                    mounted.append(d.name)
+    except OSError:
+        pass
+    return mounted
+
+
 EMBEDDING_MODEL_NAME = "bge-m3-v1.5"
 EMBEDDING_DIM = 1024
 

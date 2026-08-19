@@ -19,6 +19,8 @@
   --float-reserve: 8px;    /* 0.1.3 悬浮组并入功能条，预留区回收 */
   --topbar-h: 40px;        /* 无外框功能条高度（C1） */
   --content-max: 72ch;
+  /* 0.1.4 批 0-2：OKLCH 主色基座（只提供色相来源；C/L 在各主题内锁定） */
+  --main-color: oklch(0.65 0.18 25deg);  /* 默认朱红，与原 #d3543f 同相 */
 }
 
 /* 深色：墨底纸感（v5 dark） */
@@ -34,8 +36,10 @@
   --tx-4: #4a4844;
   --hairline: rgba(233, 231, 226, 0.12);   /* 发丝线 */
   --hairline-strong: rgba(233, 231, 226, 0.26);
-  --accent: #d3543f;       /* 唯一强调色落点 */
-  --accent-dim: rgba(211, 84, 63, 0.14);
+  /* 0.1.4 批 0-2：主色系——只有 accent 从 --main-color 取色相（锁 C/L，深 L.65）；
+     err/ok/warn/stance 语义色恒定不跟主色（决策 13） */
+  --accent: oklch(from var(--main-color) 0.65 0.16 h);
+  --accent-dim: oklch(from var(--main-color) 0.65 0.16 h / 0.14);
   --ok: #6a9955; --warn: #c8a24a; --err: #c65b53;
   --stance-1: #7d9ec7; --stance-2: #c79e7d; --stance-3: #8fb08a;
   --stance-4: #b08aa8; --stance-5: #9e948a; --stance-6: #7db3b0;
@@ -56,8 +60,10 @@
   --tx-4: #b8b5ad;
   --hairline: rgba(26, 26, 26, 0.12);
   --hairline-strong: rgba(26, 26, 26, 0.26);
-  --accent: #8a2422;
-  --accent-dim: rgba(138, 36, 34, 0.10);
+  /* 0.1.4 批 0-2：主色系——只有 accent 从 --main-color 取色相（锁 C/L，浅 L.45）；
+     err/ok/warn/stance 语义色恒定不跟主色（决策 13） */
+  --accent: oklch(from var(--main-color) 0.45 0.14 h);
+  --accent-dim: oklch(from var(--main-color) 0.45 0.14 h / 0.10);
   --ok: #4a7a3a; --warn: #9a7a1e; --err: #a33c34;
   --stance-1: #4a6d96; --stance-2: #96704a; --stance-3: #5c7f57;
   --stance-4: #7f5775; --stance-5: #6d675f; --stance-6: #4a807d;

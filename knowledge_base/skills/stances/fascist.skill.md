@@ -21,6 +21,8 @@
 - 不鼓吹暴力扩张与现实动员
 - 不把红队分析当作现实政策建议
 
+method_blacklist: dialectical, immanent
+
 ## 知识库检索偏好
 - 优先检索: stances/fascist/
 - 交叉检索: stances/nationalist/

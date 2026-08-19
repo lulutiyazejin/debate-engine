@@ -55,6 +55,18 @@ class Skill:
                 prefs["exclude"].append(stance)
         return prefs
 
+    @property
+    def method_blacklist(self) -> list[str]:
+        """0.1.4 批 3：立场×笔法兼容——任意节内 `method_blacklist: a, b` 机读行。
+        命中的风格键在该立场下从待选隐藏，后端生成时兜底回落。"""
+        for body in self.sections.values():
+            for line in body.splitlines():
+                s = line.strip()
+                if s.lower().startswith("method_blacklist:"):
+                    return [x.strip() for x in
+                            s.split(":", 1)[1].split(",") if x.strip()]
+        return []
+
 
 def _check_injection(text: str) -> list[str]:
     hits = []
@@ -137,9 +149,10 @@ class SkillLoader:
         return self._cache["fallacies"]  # type: ignore[return-value]
 
     def styles(self, reload: bool = False) -> dict[str, dict]:
-        """styles.md → {键名: {label, prompt, demo_warning}}。文件缺失返空。
+        """styles.md → {键名: {label, prompt, demo_warning, stance_free}}。文件缺失返空。
 
-        段落标题格式：`## 键名 显示名`；正文含「反面演示」行时标记警示。"""
+        段落标题格式：`## 键名 显示名`；正文含「反面演示」行时标记警示；
+        含 `[stance_free]` 行（批 3）时标记不站队（界面隐藏立场选择）。"""
         if reload or "styles" not in self._cache:
             p = self.root / "styles.md"
             out: dict[str, dict] = {}
@@ -153,10 +166,12 @@ class SkillLoader:
                         label = parts[1] if len(parts) > 1 else key
                         lines = [ln for ln in body.splitlines() if ln.strip()]
                         demo = any(ln.strip() == "反面演示" for ln in lines)
+                        free = any(ln.strip() == "[stance_free]" for ln in lines)
                         prompt = "\n".join(ln for ln in lines
-                                           if ln.strip() != "反面演示")
+                                           if ln.strip() not in ("反面演示",
+                                                                 "[stance_free]"))
                         out[key] = {"label": label, "prompt": prompt,
-                                    "demo_warning": demo}
+                                    "demo_warning": demo, "stance_free": free}
             self._cache["styles"] = out  # type: ignore[assignment]
         return self._cache["styles"]  # type: ignore[return-value]
 

@@ -20,6 +20,8 @@
 - 不本质化全称（「所有男性/女性都…」）
 - 不否认确存的生物学差异（转论社会解释）
 
+method_blacklist: dialectical, immanent
+
 ## 知识库检索偏好
 - 优先检索: stances/feminist/
 - 交叉检索: stances/marxist/、stances/liberal/

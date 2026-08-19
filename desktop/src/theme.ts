@@ -38,7 +38,32 @@ export async function setThemePref(pref: ThemePref): Promise<void> {
 
 /** 启动时调用一次（App 挂载即执行，避免首帧色板错位） */
 export async function initTheme(): Promise<void> {
+  applyAccent(getAccentHue());
   await setThemePref(getThemePref());
+}
+
+// ---------- 0.1.4 批 0-2：主色系（OKLCH 只换色相，C/L 锁在 tokens.css） ----------
+const ACCENT_KEY = "de.accent";
+export const ACCENT_PRESETS: { name: string; hue: number }[] = [
+  { name: "朱红", hue: 25 }, { name: "黛蓝", hue: 250 },
+  { name: "松绿", hue: 150 }, { name: "赭黄", hue: 75 },
+  { name: "绛紫", hue: 330 },
+];
+
+export function getAccentHue(): number {
+  const v = Number(localStorage.getItem(ACCENT_KEY));
+  return Number.isFinite(v) && localStorage.getItem(ACCENT_KEY) !== null ? v : 25;
+}
+
+function applyAccent(hue: number) {
+  // 只改色相来源；两主题各自锁 C/L（tokens.css），语义色不受影响
+  document.documentElement.style.setProperty(
+    "--main-color", `oklch(0.65 0.18 ${hue}deg)`);
+}
+
+export function setAccentHue(hue: number): void {
+  localStorage.setItem(ACCENT_KEY, String(hue));
+  applyAccent(hue);
 }
 
 /** D12 字体外挂：knowledge_base/fonts 下的字体文件注册为正文首选。

@@ -1,24 +1,26 @@
-// 反驳输出面板（项目12）：论点输入 + 立场/格式/风格/字数/引用格式/检索模式/中心点
-// 选择器 + SSE 流式输出 + 谬误疑似标注 + 引用推送右栏
+// 回答输出面板（0.1.4 批 3 三轴合一）：论点输入 + 主行（风格/立场/格式/字数）+
+// 高级折叠（引用/检索/坐标中心/谬误）+ SSE 流式输出 + 谬误标注 + 引用推送右栏。
+// 意图由风格推导（rebuttal→rebut / critique→critique / evaluate→evaluate，其余→rebut）；
+// stance_free 风格（评价）隐藏立场选择并以 stance="none" 全库平权检索。
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { api, rebutStream } from "../api";
 
 interface Options {
   formats: Record<string, string>;
-  styles: Record<string, { label: string; demo_warning: boolean }>;
+  styles: Record<string, { label: string; demo_warning: boolean;
+                           stance_free?: boolean }>;
   cite_formats: string[];
   modes: string[];
   max_length: number;
 }
 
 interface Props {
-  stances: { name: string; label?: string }[];
-  prefill: { stance?: string; argument?: string };
+  stances: { name: string; label?: string; blacklist?: string[] }[];
+  prefill: { stance?: string; argument?: string; style?: string };
   setSide: (v: { title: string; body: ReactNode } | null) => void;
   setRightOpen: (v: boolean) => void;
   notify: (msg: string) => void;
-  intent?: string;               // rebut | critique | evaluate（项目16）
   materialIds?: number[];        // 素材篮强制引用（项目18）
   onDone?: () => void;           // 生成完成（历史/素材角标刷新）
 }
@@ -27,13 +29,13 @@ const MODE_LABELS: Record<string, string> = {
   keyword: "关键词", semantic: "语义", hybrid: "混合", smart: "智能",
 };
 
-const INTENT_VERB: Record<string, string> = {
-  rebut: "反驳", critique: "批判", evaluate: "评价",
+// 批 3：风格→意图（历史记录与后端 extra 兼容）
+const STYLE_INTENT: Record<string, string> = {
+  rebuttal: "rebut", critique: "critique", evaluate: "evaluate",
 };
 
 export default function RebutPanel({ stances, prefill, setSide, setRightOpen,
-                                     notify, intent = "rebut",
-                                     materialIds = [], onDone }: Props) {
+                                     notify, materialIds = [], onDone }: Props) {
   const [opts, setOpts] = useState<Options | null>(null);
   const [centers, setCenters] = useState<{ key: string; label: string }[]>([]);
   const [argument, setArgument] = useState("");
@@ -45,6 +47,7 @@ export default function RebutPanel({ stances, prefill, setSide, setRightOpen,
   const [mode, setMode] = useState("hybrid");
   const [center, setCenter] = useState("");
   const [fallacy, setFallacy] = useState(true);
+  const [advOpen, setAdvOpen] = useState(false);
   const [running, setRunning] = useState(false);
   const [output, setOutput] = useState("");
   const [meta, setMeta] = useState<{ provider?: string; fallacies?: { name: string; quote: string; reason: string }[] }>({});
@@ -61,6 +64,7 @@ export default function RebutPanel({ stances, prefill, setSide, setRightOpen,
   useEffect(() => {
     if (prefill.stance) setStance(prefill.stance);
     if (prefill.argument) setArgument(prefill.argument);
+    if (prefill.style) setStyle(prefill.style);
   }, [prefill]);
 
   useEffect(() => {
@@ -72,6 +76,21 @@ export default function RebutPanel({ stances, prefill, setSide, setRightOpen,
     outRef.current?.scrollTo({ top: outRef.current.scrollHeight });
   }, [output]);
 
+  const stanceFree = !!opts?.styles?.[style]?.stance_free;
+  const blacklist = stances.find((s) => s.name === stance)?.blacklist || [];
+  const blockedCount = Object.keys(opts?.styles || {})
+    .filter((k) => blacklist.includes(k)).length;
+
+  // 切立场后在选笔法被黑 → 自动回落默认 + 提示（决策 16-C，不静默偷换）
+  useEffect(() => {
+    if (blacklist.includes(style)) {
+      setStyle("rebuttal");
+      const label = stances.find((s) => s.name === stance)?.label || stance;
+      notify(`「${opts?.styles?.[style]?.label || style}」与 ${label} 不兼容，已切换为默认笔法`);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stance]);
+
   const run = async () => {
     if (!argument.trim() || running) return;
     setRunning(true);
@@ -81,11 +100,14 @@ export default function RebutPanel({ stances, prefill, setSide, setRightOpen,
     abortRef.current = ctl;
     try {
       await rebutStream({
-        argument: argument.trim(), stance, format, style,
+        argument: argument.trim(),
+        stance: stanceFree ? "none" : stance,   // 批 3：评价不站队
+        format, style,
         length: length ? Number(length) : null,
         cite_format: citeFmt, fallacy, mode,
         center: center || null, stream: true,
-        intent, material_ids: materialIds,
+        intent: STYLE_INTENT[style] || "rebut",
+        material_ids: materialIds,
       }, (evt) => {
         if (evt.event === "meta") {
           setMeta({
@@ -137,22 +159,33 @@ export default function RebutPanel({ stances, prefill, setSide, setRightOpen,
                 placeholder="输入对方论点，例如：市场经济已经失败了"
                 onChange={(e) => setArgument(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter" && e.ctrlKey) run(); }} />
+      {/* 主行：风格 / 立场 / 格式 / 字数 + 生成（批 3 决策 14） */}
       <div className="controls">
-        <label>立场
-          <select value={stance} onChange={(e) => setStance(e.target.value)}>
-            {stances.map((s) => <option key={s.name} value={s.name}>{s.label || s.name}</option>)}
+        <label>风格
+          <select value={style} onChange={(e) => setStyle(e.target.value)}>
+            {Object.entries(opts?.styles || {}).map(([k, v]) => {
+              const blocked = blacklist.includes(k);
+              return (
+                <option key={k} value={k} disabled={blocked}
+                        title={blocked ? "该笔法与当前立场的世界观冲突（可在立场 skill 的 method_blacklist 修改）" : undefined}>
+                  {v.label}{v.demo_warning ? "（反面演示）" : ""}{blocked ? "（与当前立场不兼容）" : ""}
+                </option>
+              );
+            })}
           </select>
         </label>
+        {!stanceFree && (
+          <label>立场
+            <select value={stance} onChange={(e) => setStance(e.target.value)}>
+              {stances.map((s) => <option key={s.name} value={s.name}>{s.label || s.name}</option>)}
+            </select>
+          </label>
+        )}
+        {stanceFree && <span className="muted small">评价不站队：多立场权衡，全库平权检索</span>}
         <label>格式
           <select value={format} onChange={(e) => setFormat(e.target.value)}>
             {Object.entries(opts?.formats || {}).map(([k, v]) =>
               <option key={k} value={k}>{v.split("：")[0]}</option>)}
-          </select>
-        </label>
-        <label>风格
-          <select value={style} onChange={(e) => setStyle(e.target.value)}>
-            {Object.entries(opts?.styles || {}).map(([k, v]) =>
-              <option key={k} value={k}>{v.label}{v.demo_warning ? "（反面演示）" : ""}</option>)}
           </select>
         </label>
         <label>字数
@@ -160,33 +193,44 @@ export default function RebutPanel({ stances, prefill, setSide, setRightOpen,
                  max={opts?.max_length ?? 2000} value={length}
                  onChange={(e) => setLength(e.target.value)} />
         </label>
-        <label>引用
-          <select value={citeFmt} onChange={(e) => setCiteFmt(e.target.value)}>
-            {(opts?.cite_formats || ["plain"]).map((c) =>
-              <option key={c} value={c}>{{ plain: "普通", gbt7714: "GB/T 7714", apa: "APA" }[c] || c}</option>)}
-          </select>
-        </label>
-        <label>检索
-          <select value={mode} onChange={(e) => setMode(e.target.value)}>
-            {(opts?.modes || ["hybrid"]).map((m) =>
-              <option key={m} value={m}>{MODE_LABELS[m] || m}</option>)}
-          </select>
-        </label>
-        <label>坐标中心
-          <select value={center} onChange={(e) => setCenter(e.target.value)}>
-            <option value="">（不启用）</option>
-            {centers.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
-          </select>
-        </label>
-        <label className="chk">
-          <input type="checkbox" checked={fallacy}
-                 onChange={(e) => setFallacy(e.target.checked)} /> 谬误检测
-        </label>
         {running
           ? <button className="primary stop" onClick={stop}>停止</button>
           : <button className="primary" onClick={run} disabled={!argument.trim()}>
-              生成{INTENT_VERB[intent] || "回应"}（Ctrl+Enter）</button>}
+              生成回答（Ctrl+Enter）</button>}
+        <button className="fold" onClick={() => setAdvOpen(!advOpen)}>
+          高级 {advOpen ? "▾" : "▸"}</button>
       </div>
+
+      {/* 高级折叠：引用 / 检索 / 坐标中心 / 谬误检测（设一次基本不动） */}
+      {advOpen && (
+        <div className="controls">
+          <label>引用
+            <select value={citeFmt} onChange={(e) => setCiteFmt(e.target.value)}>
+              {(opts?.cite_formats || ["plain"]).map((c) =>
+                <option key={c} value={c}>{{ plain: "普通", gbt7714: "GB/T 7714", apa: "APA" }[c] || c}</option>)}
+            </select>
+          </label>
+          <label>检索
+            <select value={mode} onChange={(e) => setMode(e.target.value)}>
+              {(opts?.modes || ["hybrid"]).map((m) =>
+                <option key={m} value={m}>{MODE_LABELS[m] || m}</option>)}
+            </select>
+          </label>
+          <label>坐标中心
+            <select value={center} onChange={(e) => setCenter(e.target.value)}>
+              <option value="">（不启用）</option>
+              {centers.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+            </select>
+          </label>
+          <label className="chk">
+            <input type="checkbox" checked={fallacy}
+                   onChange={(e) => setFallacy(e.target.checked)} /> 谬误检测
+          </label>
+          {blockedCount > 0 && (
+            <span className="muted small">{blockedCount} 个笔法与当前立场不兼容（下拉内灰显）</span>
+          )}
+        </div>
+      )}
 
       {demoStyle && (
         <div className="demo-warn">⚠ 反面演示风格——输出将展示错误论证方式，仅供识别学习，勿实际使用</div>

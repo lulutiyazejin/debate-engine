@@ -74,7 +74,7 @@ class ImportPreview:
 PENDING: dict[str, ImportPreview] = {}
 
 
-SUPPORTED_EXTS = {".pdf", ".docx", ".doc", ".xlsx", ".xls",
+SUPPORTED_EXTS = {".pdf", ".docx", ".doc", ".xlsx", ".xls", ".csv",
                   ".txt", ".md", ".markdown"}
 
 
@@ -301,7 +301,8 @@ class Indexer:
         return pv
 
     # ---------- Stage 7-10：确认入库 ----------
-    def confirm(self, preview: ImportPreview, stance: str) -> dict:
+    def confirm(self, preview: ImportPreview, stance: str,
+                archive: str | None = None) -> dict:
         pv, doc_id, trace_id = preview, preview.doc_id, preview.trace_id
         emb = get_embedder()
 
@@ -410,13 +411,24 @@ class Indexer:
             if not dst.exists():
                 shutil.copy2(src, dst)
 
+        # Stage 9b 档案库（0.1.4 批 6）：人可读 md + 原件按策略归档
+        from ingestion import archiver
+        policy = archive or config.load_settings().get("archive_policy")
+        if policy in (None, "", "ask"):
+            policy = "copy"
+        arch = archiver.archive_document(
+            doc_id, pv.parsed.title, pv.parsed.author, pv.parsed.year,
+            stance, pv.source, pv.parsed.source_type,
+            "\n\n".join(c.text for c in pv.chunks), pv.doc_summary or "",
+            policy=policy)
+
         # Stage 10 INDEX.md
         self._update_index()
         log_ingestion(trace_id, "import_complete", doc_id, stage="finalize",
                       status="done")
         PENDING.pop(doc_id, None)
         return {"doc_id": doc_id, "stance": stance, "chunks": len(pv.chunks),
-                "meta_path": str(meta_path)}
+                "meta_path": str(meta_path), "archive": arch}
 
     def _update_index(self) -> None:
         docs = self.db.list_documents()
@@ -552,21 +564,26 @@ class Indexer:
             if target != p:
                 p.unlink()
             moved.append(str(target))
-        # 4) INDEX.md 重生成；5) 检索权重无需动作；6) 日志
+        # 4) INDEX.md 重生成；5) 检索权重无需动作；6) 日志；7) 档案库同步（0.1.4）
+        from ingestion import archiver
+        moved += archiver.move_archive(doc_id, new_stance)
         self._update_index()
         log_ingestion(new_trace_id(), "reassign", doc_id, stage="reassign",
                       status="done", old_stance=old, new_stance=new_stance)
         return {"doc_id": doc_id, "old_stance": old, "stance": new_stance,
                 "moved": moved}
 
-    # ---------- 删除（五源级联） ----------
-    def delete_document(self, doc_id: str) -> dict:
+    # ---------- 删除（五源级联 + 可选档案） ----------
+    def delete_document(self, doc_id: str, delete_archive: bool = False) -> dict:
+        from ingestion import archiver
         counts = self.db.delete_document(doc_id)
         counts["vectors"] = self.vec.delete_doc(doc_id)
         for meta in config.STANCES_PATH.glob(f"*/{doc_id}.meta.json"):
             meta.unlink()
         for md in config.STANCES_PATH.glob(f"*/{doc_id}.md"):
             md.unlink()   # 级联第六处：标准化 Markdown（项目5）
+        if delete_archive:   # 0.1.4 批 6：默认保留档案，显式要求才删
+            counts["archive"] = archiver.delete_archive(doc_id)
         cache = self._summary_cache_path(doc_id)
         if cache.exists():
             cache.unlink()

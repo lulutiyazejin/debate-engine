@@ -349,3 +349,107 @@ def ollama_pull(req: OllamaPull):
         yield _json.dumps(final, ensure_ascii=False) + "\n"
 
     return StreamingResponse(_stream(), media_type="application/x-ndjson")
+
+
+# ---------- 0.1.4 批 5（决策 3）：任务链编辑（自主选择生效模型） ----------
+
+class TaskChainPatch(BaseModel):
+    task: str = Field(min_length=1)
+    chain: list[str] = Field(min_length=1, max_length=10)
+
+
+@router.patch("/config/task-chains")
+def patch_task_chain(req: TaskChainPatch):
+    """按任务覆盖优先级链，写 settings.json task_chains 键，热生效。
+    校验：任务存在、服务商存在（内置+自定义）、offline 兜底不许写入链。"""
+    if req.task not in config.TASK_CHAINS:
+        raise HTTPException(422, f"未知任务 {req.task}，可选: {list(config.TASK_CHAINS)}")
+    known = set(config.PROVIDER_URLS) | {"ollama"} | {
+        c.get("name") for c in config.effective_custom_providers()}
+    bad = [n for n in req.chain if n not in known]
+    if bad:
+        raise HTTPException(422, f"未知服务商: {'、'.join(bad)}")
+    if "offline" in req.chain:
+        raise HTTPException(422, "offline 是自动兜底，不写入链")
+    s = config.load_settings()
+    chains = s.get("task_chains") or {}
+    chains[req.task] = req.chain
+    config.save_settings({"task_chains": chains})
+    reset_router()
+    return {"task": req.task, "chain": req.chain}
+
+
+# ---------- 0.1.4 批 5（决策 2）：数据目录迁移 ----------
+
+class MigratePost(BaseModel):
+    target: str = Field(min_length=3)
+
+
+@router.get("/config/data-root")
+def get_data_root():
+    return {"path": str(config.KNOWLEDGE_BASE_PATH),
+            "marker": str(config.DATA_ROOT_MARKER),
+            "overridden": config.DATA_ROOT_MARKER.exists()}
+
+
+@router.post("/config/data-root/migrate")
+def migrate_data(req: MigratePost):
+    """整目录复制迁移（NDJSON 进度：体积/速度）→ 写 data-root.txt → 提示重启。
+    旧目录保留（决策 2）；目标须为空目录或不存在。"""
+    import json as _json
+    import shutil
+    import time as _time
+    from fastapi.responses import StreamingResponse
+
+    src = config.KNOWLEDGE_BASE_PATH
+    dst = Path(req.target)
+    if dst.exists() and any(dst.iterdir()):
+        raise HTTPException(422, "目标目录非空，请选择空目录或新目录")
+    try:
+        dst.mkdir(parents=True, exist_ok=True)
+        probe = dst / ".write_probe"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink()
+    except OSError as e:
+        raise HTTPException(422, f"目标目录不可写: {e}")
+
+    def _stream():
+        from api.deps import get_engine
+        # 1) SQLite 落盘冻结（WAL 并入主库，副本自洽）
+        try:
+            get_engine().db.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except Exception as e:  # noqa: BLE001 诊断信息带回
+            yield _json.dumps({"status": f"checkpoint 跳过（{e}）"},
+                              ensure_ascii=False) + "\n"
+        files = [p for p in src.rglob("*") if p.is_file()]
+        total = sum(p.stat().st_size for p in files)
+        done = 0
+        t0 = _time.time()
+        yield _json.dumps({"status": "开始复制", "total_bytes": total,
+                           "files": len(files)}, ensure_ascii=False) + "\n"
+        try:
+            for i, p in enumerate(files):
+                rel = p.relative_to(src)
+                tp = dst / rel
+                tp.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(p, tp)
+                done += p.stat().st_size
+                if i % 20 == 0 or done == total:
+                    speed = done / max(_time.time() - t0, 0.1)
+                    yield _json.dumps({
+                        "percent": round(done * 100 / max(total, 1), 1),
+                        "done_bytes": done, "speed_bps": int(speed),
+                    }, ensure_ascii=False) + "\n"
+            # 2) 写数据根标记（放数据目录之外，%APPDATA%）
+            config.DATA_ROOT_MARKER.parent.mkdir(parents=True, exist_ok=True)
+            config.DATA_ROOT_MARKER.write_text(str(dst), encoding="utf-8")
+            yield _json.dumps({"done": True, "ok": True,
+                               "detail": f"已迁移到 {dst}，重启软件生效；"
+                                         f"旧目录保留于 {src}"},
+                              ensure_ascii=False) + "\n"
+        except Exception as e:  # noqa: BLE001 复制中断显式报告
+            yield _json.dumps({"done": True, "ok": False,
+                               "detail": f"迁移失败：{e}（旧目录未动，可重试）"},
+                              ensure_ascii=False) + "\n"
+
+    return StreamingResponse(_stream(), media_type="application/x-ndjson")

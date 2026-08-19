@@ -20,6 +20,8 @@
 - 不使用社会达尔文主义
 - 不否认贫困存在（只辩论解法）
 
+method_blacklist: dialectical, immanent
+
 ## 知识库检索偏好
 - 优先检索: stances/neoliberal/
 - 交叉检索: stances/liberal/

@@ -18,6 +18,8 @@
 - 不为官僚化的福利体制辩护到底
 - 不攻击对方人格
 
+method_blacklist: dialectical, immanent
+
 ## 知识库检索偏好
 - 优先检索: stances/social_democracy/
 - 交叉检索: stances/empirical/

@@ -95,6 +95,10 @@ export default function ImportPanel({ stances, notify, onDone }: Props) {
         school: wf.school || "", author_years: wf.author_years || "",
         edition: wf.edition || "",
       });
+      // 0.1.4 批 6（决策 6）：读记住的归档策略预选（ask 保持默认 copy）
+      api.get<{ policy: string }>("/api/import/archive-policy")
+        .then((r) => { if (r.policy !== "ask") setArchivePolicy(r.policy); })
+        .catch(() => {});
     } catch (e) {
       if (String(e).includes("文件夹")) {
         // 拖进来的是目录 → 改走批量接口（服务端递归展开）
@@ -107,12 +111,17 @@ export default function ImportPanel({ stances, notify, onDone }: Props) {
     }
   };
 
+  // 0.1.4 批 6：归档三选（复制/迁移/不归档）+「记住选择」写 settings
+  const [archivePolicy, setArchivePolicy] = useState("copy");
+  const [rememberArchive, setRememberArchive] = useState(false);
+
   const confirmImport = async () => {
     if (!preview) return;
     setBusy("入库中（切块/向量化/写索引）…");
     try {
       await api.post("/api/import/confirm", {
         doc_id: preview.doc_id, stance: chosenStance, on_duplicate: onDup,
+        archive: archivePolicy, remember: rememberArchive,
       });
       // C4/B5：确认屏上编辑过的字段落库（记入 manual_fields，手动永久优先）
       const patch: Record<string, unknown> = {};
@@ -152,7 +161,7 @@ export default function ImportPanel({ stances, notify, onDone }: Props) {
   const pickFiles = async () => {
     const sel = await open({
       multiple: true, title: "选择要导入的文档",
-      filters: [{ name: "文档", extensions: ["pdf", "docx", "doc", "xlsx", "xls", "txt", "md", "markdown"] }],
+      filters: [{ name: "文档", extensions: ["pdf", "docx", "doc", "xlsx", "xls", "csv", "txt", "md", "markdown"] }],
     });
     if (sel) importSources(Array.isArray(sel) ? sel : [sel]);
   };
@@ -254,6 +263,18 @@ export default function ImportPanel({ stances, notify, onDone }: Props) {
               <select value={chosenStance} onChange={(e) => setChosenStance(e.target.value)}>
                 {stances.map((s) => <option key={s.name} value={s.name}>{s.label || s.name}</option>)}
               </select>
+            </label>
+            <label>原件归档
+              <select value={archivePolicy} onChange={(e) => setArchivePolicy(e.target.value)}>
+                <option value="copy">复制进档案库</option>
+                <option value="move">迁移进档案库</option>
+                <option value="none">不归档</option>
+              </select>
+            </label>
+            <label className="chk">
+              <input type="checkbox" checked={rememberArchive}
+                     onChange={(e) => setRememberArchive(e.target.checked)} />
+              记住选择
             </label>
             <button className="primary" onClick={confirmImport} disabled={!!busy}>确认入库</button>
             <button onClick={() => setPreview(null)}>取消</button>

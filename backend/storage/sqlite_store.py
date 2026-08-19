@@ -99,7 +99,14 @@ CREATE TABLE IF NOT EXISTS basket (
     source      TEXT DEFAULT '',
     used        INTEGER DEFAULT 0,
     added_at    TEXT,
+    group_id    INTEGER,                -- 0.1.4 批 4：所属素材组（必属一组）
     UNIQUE (item_type, ref_id)
+);
+CREATE TABLE IF NOT EXISTS material_groups (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL UNIQUE,
+    pinned      INTEGER DEFAULT 0,      -- 1 = 公共素材组（永置顶不可删改）
+    created_at  TEXT
 );
 CREATE TABLE IF NOT EXISTS responses (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -130,6 +137,7 @@ CREATE INDEX IF NOT EXISTS idx_docs_stance ON documents(stance, deleted_at);
 # 旧库增量迁移：(表, 列, 列定义)。SQLite 不支持 ALTER 加外键，
 # 外键约束仅对全新库生效，旧库靠业务层级联逻辑兑底。
 _MIGRATIONS: list[tuple[str, str, str]] = [
+    ("basket", "group_id", "INTEGER"),      # 0.1.4 批 4：素材必属一组
     ("documents", "content_hash", "TEXT"),
     ("documents", "source_path", "TEXT"),
     ("documents", "created_at", "TEXT"),
@@ -174,6 +182,11 @@ class SqliteStore(MetadataStoreBase):
         self.conn.executescript(_SCHEMA)
         self._migrate()
         self.conn.executescript(_INDEXES)
+        self.conn.commit()
+        # 0.1.4 批 4：公共素材组常在；旧库存量素材（group_id 空）归公共组
+        pub = self._ensure_public_group()
+        self.conn.execute(
+            "UPDATE basket SET group_id=? WHERE group_id IS NULL", (pub,))
         self.conn.commit()
 
     def _migrate(self) -> None:
@@ -452,18 +465,81 @@ class SqliteStore(MetadataStoreBase):
             "arg_units": q(f"SELECT COUNT(*) FROM arg_units WHERE doc_id IN ({live})"),
         }
 
-    # ---------- 素材篮（项目18：跨面弹药通道，不入分享包） ----------
-    BASKET_CAP = 20
+    # ---------- 素材组（0.1.4 批 4：素材篮升级，存储无上限、注入预算 20） ----------
+    BASKET_CAP = 20          # 仅作单次注入预算展示（prompt 物理限制），不限存储
+    PUBLIC_GROUP = "公共素材组"   # 永置顶，不可删改；删组时材料归这里（无孤儿）
+
+    def _ensure_public_group(self) -> int:
+        row = self.conn.execute(
+            "SELECT id FROM material_groups WHERE pinned=1").fetchone()
+        if row:
+            return row["id"]
+        cur = self.conn.execute(
+            "INSERT INTO material_groups(name, pinned, created_at) "
+            "VALUES (?,1,datetime('now','localtime'))", (self.PUBLIC_GROUP,))
+        self.conn.commit()
+        return cur.lastrowid
+
+    def public_group_id(self) -> int:
+        return self._ensure_public_group()
+
+    def group_list(self) -> list[dict]:
+        """全部组（公共置顶）+ 每组素材计数。"""
+        self._ensure_public_group()
+        rows = self.conn.execute(
+            "SELECT g.*, (SELECT COUNT(*) FROM basket b WHERE b.group_id=g.id) "
+            "AS count FROM material_groups g "
+            "ORDER BY g.pinned DESC, g.id").fetchall()
+        return [dict(r) for r in rows]
+
+    def group_add(self, name: str) -> dict:
+        name = name.strip()
+        if not name:
+            raise ValueError("组名不能为空")
+        if self.conn.execute("SELECT 1 FROM material_groups WHERE name=?",
+                             (name,)).fetchone():
+            raise ValueError(f"组「{name}」已存在")
+        cur = self.conn.execute(
+            "INSERT INTO material_groups(name, pinned, created_at) "
+            "VALUES (?,0,datetime('now','localtime'))", (name,))
+        self.conn.commit()
+        return {"id": cur.lastrowid, "name": name}
+
+    def group_rename(self, group_id: int, name: str) -> int:
+        row = self.conn.execute("SELECT pinned FROM material_groups WHERE id=?",
+                                (group_id,)).fetchone()
+        if row is None:
+            raise ValueError("组不存在")
+        if row["pinned"]:
+            raise ValueError("公共素材组不可改名")
+        cur = self.conn.execute("UPDATE material_groups SET name=? WHERE id=?",
+                                (name.strip(), group_id))
+        self.conn.commit()
+        return cur.rowcount
+
+    def group_delete(self, group_id: int) -> dict:
+        """删组不删料：组内素材并入公共素材组（决策 15）。"""
+        row = self.conn.execute("SELECT pinned FROM material_groups WHERE id=?",
+                                (group_id,)).fetchone()
+        if row is None:
+            raise ValueError("组不存在")
+        if row["pinned"]:
+            raise ValueError("公共素材组不可删除")
+        pub = self._ensure_public_group()
+        moved = self.conn.execute(
+            "UPDATE basket SET group_id=? WHERE group_id=?",
+            (pub, group_id)).rowcount
+        self.conn.execute("DELETE FROM material_groups WHERE id=?", (group_id,))
+        self.conn.commit()
+        return {"moved": moved}
 
     def basket_add(self, item_type: str, ref_id: str, excerpt: str,
-                   source: str = "") -> dict:
-        n = self.conn.execute("SELECT COUNT(*) FROM basket").fetchone()[0]
-        if n >= self.BASKET_CAP:
-            raise ValueError(f"素材篮已满（上限 {self.BASKET_CAP} 条），请先清理")
+                   source: str = "", group_id: int | None = None) -> dict:
+        gid = group_id or self._ensure_public_group()
         cur = self.conn.execute(
             "INSERT OR IGNORE INTO basket(item_type, ref_id, excerpt, source, "
-            "added_at) VALUES (?,?,?,?,datetime('now','localtime'))",
-            (item_type, ref_id, excerpt[:800], source))
+            "group_id, added_at) VALUES (?,?,?,?,?,datetime('now','localtime'))",
+            (item_type, ref_id, excerpt[:800], source, gid))
         self.conn.commit()
         return {"id": cur.lastrowid, "duplicated": cur.rowcount == 0}
 

@@ -50,7 +50,7 @@ def detect_type(path_or_url: str) -> str:
         return "url"
     ext = Path(s).suffix
     return {".pdf": "pdf", ".docx": "docx", ".doc": "docx",
-            ".xlsx": "excel", ".xls": "excel", ".txt": "txt",
+            ".xlsx": "excel", ".xls": "excel", ".csv": "csv", ".txt": "txt",
             ".md": "md", ".markdown": "md"}.get(ext, "txt")
 
 
@@ -107,9 +107,46 @@ def _text_to_doc(text: str, title: str, source_type: str) -> ParsedDocument:
 # ---------- PDF ----------
 def parse_pdf(path: Path) -> ParsedDocument:
     try:
-        return _parse_pdf_docling(path)
+        doc = _parse_pdf_docling(path)
     except ImportError:
-        return _parse_pdf_pypdf(path)
+        doc = _parse_pdf_pypdf(path)
+    # 0.1.4 批 6（决策 7）：文字层过薄 → 扫描件 OCR 分支；无组件显式报告
+    if len(doc.full_text.strip()) < 200:
+        try:
+            return _parse_pdf_ocr(path)
+        except ImportError:
+            doc.raw_metadata["ocr_needed"] = True
+            doc.raw_metadata["conversion_note"] = (
+                "扫描版 PDF：未安装 OCR 组件（设置→组件中心），"
+                "本次只能归档元数据与摘要")
+    return doc
+
+
+def _parse_pdf_ocr(path: Path) -> ParsedDocument:
+    """RapidOCR（ONNX，不背框架）+ pypdfium2 渲染；组件中心装入 _extras。"""
+    import numpy as np
+    import pypdfium2 as pdfium
+    from rapidocr_onnxruntime import RapidOCR
+    ocr = RapidOCR()
+    pdf = pdfium.PdfDocument(str(path))
+    pages_text: list[str] = []
+    for i in range(len(pdf)):
+        bitmap = pdf[i].render(scale=2.0)
+        img = np.asarray(bitmap.to_pil())
+        result, _ = ocr(img)
+        pages_text.append("\n".join(r[1] for r in (result or [])))
+    pdf.close()
+    sections: list[Section] = []
+    step = 8
+    for i in range(0, len(pages_text), step):
+        body = "\n".join(pages_text[i:i + step]).strip()
+        if body:
+            sections.append(Section(f"第{i // step + 1}部分", body, 1,
+                                    f"p.{i + 1}-{min(i + step, len(pages_text))}"))
+    doc = ParsedDocument(source_type="pdf", title=path.stem,
+                         sections=sections or [Section(path.stem, "", 1)])
+    doc.raw_metadata["parser"] = "rapidocr"
+    return doc
 
 
 def _parse_pdf_docling(path: Path) -> ParsedDocument:
@@ -221,8 +258,35 @@ def parse_excel(path: Path) -> ParsedDocument:
                           sections=sections or [Section(path.stem, "", 1)])
 
 
+# ---------- CSV（0.1.4 批 6 决策 8：进支持清单，编码回退） ----------
+def parse_csv(path: Path) -> ParsedDocument:
+    import csv as _csv
+    raw = path.read_bytes()
+    text = None
+    for enc in ("utf-8-sig", "utf-8", "gbk", "gb18030"):
+        try:
+            text = raw.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    if text is None:
+        text = raw.decode("utf-8", errors="replace")
+    rows = list(_csv.reader(text.splitlines()))
+    lines = []
+    header = rows[0] if rows else []
+    for vals in rows[1:501]:
+        pairs = [f"{h}={v}" for h, v in zip(header, vals) if v]
+        if pairs:
+            lines.append("；".join(pairs))
+    body = (f"表格《{path.stem}》共 {len(lines)} 行数据：\n" + "\n".join(lines)
+            if lines else "")
+    return ParsedDocument(source_type="excel", title=path.stem,
+                          sections=[Section(path.stem, body, 1)])
+
+
 # ---------- URL ----------
 def parse_url(url: str) -> ParsedDocument:
+    html: str | None = None
     try:
         import trafilatura
         html = trafilatura.fetch_url(url)
@@ -234,6 +298,9 @@ def parse_url(url: str) -> ParsedDocument:
         import httpx
         r = httpx.get(url, timeout=20, follow_redirects=True,
                       headers={"User-Agent": "Mozilla/5.0"})
+        if r.status_code == 403:
+            raise ValueError(f"站点反爬拒绝（403）：{url}；"
+                             f"可浏览器下载附件后用文件导入")
         html = r.text
         tm = re.search(r"<title[^>]*>(.*?)</title>", html, re.DOTALL | re.I)
         title = re.sub(r"\s+", " ", tm.group(1)).strip() if tm else url
@@ -245,7 +312,36 @@ def parse_url(url: str) -> ParsedDocument:
     doc = _text_to_doc(text, title=title, source_type="url")
     doc.author = author
     doc.raw_metadata["url"] = url
+    _enrich_url_tables(doc, html, url)
     return doc
+
+
+def _enrich_url_tables(doc: ParsedDocument, html: str | None, url: str) -> None:
+    """0.1.4 批 6（决策 8，借 akshare 解析结论）：政府站/统计页表格全抽取
+    → md 表格节；附件链接（xls/xlsx/csv/pdf）发现 → raw_metadata 供确认屏提示。
+    pandas/lxml 缺位时静默跳过（不阻断正文导入）。"""
+    if not html:
+        return
+    try:
+        import io
+        import pandas as pd
+        tables = pd.read_html(io.StringIO(html))
+        for i, t in enumerate(tables):
+            if t.shape[0] < 2 or t.shape[1] < 2:
+                continue   # 装饰性小表跳过
+            md = t.head(200).to_markdown(index=False)
+            doc.sections.append(Section(f"页内表格 {i + 1}", md, 2))
+    except Exception:
+        pass
+    try:
+        from urllib.parse import urljoin
+        links = re.findall(r'href=["\']([^"\']+?\.(?:xlsx?|csv|pdf))["\']',
+                           html, flags=re.I)
+        if links:
+            doc.raw_metadata["attachments"] = sorted(
+                {urljoin(url, x) for x in links})[:20]
+    except Exception:
+        pass
 
 
 # ---------- 统一入口 ----------
@@ -257,4 +353,4 @@ def parse_any(path_or_url: str) -> ParsedDocument:
     if not p.exists():
         raise FileNotFoundError(path_or_url)
     return {"pdf": parse_pdf, "docx": parse_docx, "excel": parse_excel,
-            "md": parse_md, "txt": parse_txt}[t](p)
+            "md": parse_md, "txt": parse_txt, "csv": parse_csv}[t](p)

@@ -42,7 +42,7 @@ export interface MenuItem {
   submenu?: { key: string; label: string }[];
 }
 
-export interface StanceOpt { name: string; label: string }
+export interface StanceOpt { name: string; label: string; blacklist?: string[] }
 
 type Face = "library" | "respond";
 
@@ -275,6 +275,7 @@ function App() {
   const stanceOpts: StanceOpt[] = useMemo(() => stances.map((s) => ({
     name: s.name,
     label: (s.title as string)?.replace(/^SKILL[:：]\s*/, "") || s.name,
+    blacklist: (s.method_blacklist as string[] | undefined) || [],   // 批 3：笔法兼容
   })), [stances]);
 
   const win = getCurrentWindow();
@@ -365,7 +366,11 @@ function App() {
           <div className="overlay-card" onClick={(e) => e.stopPropagation()}>
             <div className="overlay-head">
               <span>设置</span>
-              <button className="link" onClick={() => setSettingsOpen(false)}>关闭 (Esc)</button>
+              <button className="link" title="关闭 (Esc)" onClick={() => setSettingsOpen(false)}>
+                <svg width="14" height="14" viewBox="0 0 16 16">
+                  <path d="M2 8h12 M10 5l4 3-4 3z" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                </svg>
+              </button>
             </div>
             <SettingsPanel notify={notify} />
           </div>
@@ -393,7 +398,7 @@ function App() {
             </>}
             {tourStep === 2 && <>
               <h3>回应面</h3>
-              <p>输入对方言论，选择意图（反驳 / 批判 / 评价 / 分析 / 综合报告）生成带引用的回应。知识库面收集的素材会进入左侧素材篮。</p>
+              <p>输入对方言论，选择风格（反驳 / 批判性分析 / 评价等 14 种笔法）生成带引用的回答。知识库面收集的素材进左侧素材组，勾选注入生成。</p>
             </>}
             <div className="tour-nav">
               <span className="muted">{tourStep + 1} / 3</span>

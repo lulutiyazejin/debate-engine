@@ -20,6 +20,8 @@
 - 不使用种族优越论
 - 不诉诸神权政治
 
+method_blacklist: dialectical, immanent
+
 ## 知识库检索偏好
 - 优先检索: stances/feudal_traditional/
 - 交叉检索: stances/conservative/

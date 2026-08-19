@@ -18,6 +18,8 @@
 - 不用单一研究下结论
 - 不攻击对方人格
 
+method_blacklist: dialectical, immanent
+
 ## 知识库检索偏好
 - 优先检索: stances/empirical/
 - 交叉检索: stances/shared/

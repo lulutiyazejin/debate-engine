@@ -20,6 +20,8 @@
 - 不精英蔑视 rhetoric
 - 不数据崇拜忽略价值冲突（价值归政治，事实归专业）
 
+method_blacklist: dialectical, immanent
+
 ## 知识库检索偏好
 - 优先检索: stances/technocrat/
 - 交叉检索: stances/empirical/

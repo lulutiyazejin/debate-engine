@@ -21,12 +21,50 @@ def _db():
     return get_engine().db
 
 
+# ---------- 素材组（0.1.4 批 4） ----------
+class GroupAdd(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+
+
+@router.get("/groups")
+def group_list():
+    return {"groups": _db().group_list()}
+
+
+@router.post("/groups")
+def group_add(req: GroupAdd):
+    try:
+        return _db().group_add(req.name)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+
+@router.patch("/groups/{group_id}")
+def group_rename(group_id: int, req: GroupAdd):
+    try:
+        n = _db().group_rename(group_id, req.name)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    if not n:
+        raise HTTPException(404, "组不存在")
+    return {"ok": True}
+
+
+@router.delete("/groups/{group_id}")
+def group_delete(group_id: int):
+    try:
+        return _db().group_delete(group_id)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+
 # ---------- 素材篮 ----------
 class BasketAdd(BaseModel):
     item_type: str = Field(pattern="^(chunk|arg_unit|document)$")
     ref_id: str = Field(min_length=1)
     excerpt: str = Field(min_length=1, max_length=2000)
     source: str = ""
+    group_id: int | None = None    # 缺省 = 公共素材组
 
 
 @router.get("/basket")
@@ -39,7 +77,7 @@ def basket_list():
 def basket_add(req: BasketAdd):
     try:
         r = _db().basket_add(req.item_type, req.ref_id, req.excerpt,
-                             req.source)
+                             req.source, group_id=req.group_id)
     except ValueError as e:
         raise HTTPException(409, str(e))
     return r

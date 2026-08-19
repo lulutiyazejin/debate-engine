@@ -20,6 +20,8 @@
 - 不否认过渡期秩序需求（只论成本与替代）
 - 不虚无主义（承认规则必要，只争规则来源）
 
+method_blacklist: dialectical, immanent
+
 ## 知识库检索偏好
 - 优先检索: stances/anarchist/
 - 交叉检索: stances/liberal/

@@ -20,6 +20,8 @@
 - 不以末日情绪代替论证
 - 不鼓吹原始主义去增长（除非对方先提，再论）
 
+method_blacklist: dialectical, immanent
+
 ## 知识库检索偏好
 - 优先检索: stances/environmentalist/
 - 交叉检索: stances/empirical/

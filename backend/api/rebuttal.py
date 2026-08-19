@@ -40,7 +40,8 @@ def rebuttal_options():
     return {"intents": {k: v["label"] for k, v in INTENTS.items()},
             "formats": FORMATS,
             "styles": {k: {"label": v["label"],
-                           "demo_warning": v["demo_warning"]}
+                           "demo_warning": v["demo_warning"],
+                           "stance_free": v.get("stance_free", False)}
                        for k, v in get_styles().items()},
             "cite_formats": ["plain", "gbt7714", "apa"],
             "modes": ["keyword", "semantic", "hybrid", "smart"],

@@ -85,6 +85,12 @@ def get_embedder() -> EmbedderBase:
     return _instance
 
 
+def reset_embedder() -> None:
+    """组件中心装/卸 BGE-M3 后调用：下次 get_embedder 重新探测（热生效）。"""
+    global _instance
+    _instance = None
+
+
 def embedder_status() -> dict:
     e = get_embedder()
     return {"impl": type(e).__name__, "model": e.name, "dim": e.dim,

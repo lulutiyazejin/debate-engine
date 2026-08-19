@@ -92,7 +92,68 @@
 
 ## 改动台账
 
-（批 0–7 执行时追加）
+### Phase 0（清隐患）
+- 0-1 `models/embedder.py`：HashEmbedder.name → `bge-m3-v1.5#hash`（重嵌入圈定精准）；pytest 绿
+- 0-2 `Software Architecture.md` §5：豁免表按 fresh 行数扫描重写（V1.1 基线，app→desktop 路径修正）
+- 0-3 `upload-release.ps1`：默认只传源码，`-WithInstaller` 才传安装包（AGENTS.md 对齐）
+
+### 批 0（视觉纯前端）
+- 4 `App.tsx`：设置退出钮 → 自绘 1.4px「→」SVG（title 保留关闭 Esc）
+- 15 `tokens.css`+`theme.ts`+`SettingsPanel.tsx`：OKLCH 主色系——--main-color 基座只供色相，两主题锁 C/L（浅 .45/.14、深 .65/.16）；err/ok/warn/stance 恒定不跟主色（决策13 修正过一次错误实现）；五预设 swatch+色相滑杆，存 de.accent
+- 18 `styles.css` 线减法：删 lib/resp 四条栏竖线、col-head/dossier-head/dossier-meta/seg/chip-bar 行下线；留 topbar 下缘/lib-search 工具区下缘/控件描边/纸叠层
+- 19 `styles.css` 高度阶梯：button/input/select 统一 32（textarea/checkbox/radio/range 豁免）、seg 行与 col-head/dossier-head 统一 40、chip 24；search-input max-width 560、year-input 88
+- 21 `styles.css` 滚动条 token 化：thin + webkit 族（thumb=hairline-strong hover=tx-3 track 透明 10px）
+- 门禁：tsc 零错误 · vite 构建通过
+
+### 批 1（图谱缩放 bug）
+- 20 `GraphPanel.tsx`：ResizeObserver 等值守卫斩自反馈回环 + host overflow:hidden + ref 显式管镜头（全量重载后 zoomToFit 一次，chip/选档保持视口）
+
+### 批 2（布局+选择器）
+- 共用件：`lib/fuzzy.ts`（子串+拼音首字母，GB 边界字+Collator 零依赖）、`components/Combobox.tsx`（输入即滤+命中 accent 高亮+窗口化+↑↓/Enter/Esc+查看钮）、`components/DocTree.tsx`（立场组折叠记忆/全展全收/外部跳转自动展开/树内过滤）
+- 22 `LibraryFace.tsx`：常驻左栏退役，馆藏 tab 主从（左树右导入）；统计三数变紧凑条；检索结果命中词 Hl 高亮
+- 23 `GraphPanel/ComparePanel`：文档/立场选择换 Combobox（带作者副行+「查看」开右栏）
+- App.tsx 424→409 行（豁免表销账一格）
+
+### 批 3（三轴合一）
+- `styles.md` 重写 14 条：critique 吸收结构攻击 prompt、新增 evaluate（[stance_free] 标记）；`skill_loader.py` 解析 stance_free + Skill.method_blacklist 机读行
+- `rebuttal_engine.py`：stance="none" 中立评审模板跳过 skill 注入；generate 黑名单兜底回落（16-E）；`stance_router.py` none→全库平权；options 带 stance_free；stances 列表带 method_blacklist
+- `add_blacklist.py`：15 个非马族预置立场追加 `method_blacklist: dialectical, immanent`
+- 前端：RespondFace tab 收为 回答/分析/综合报告（旧意图历史映射+回填转风格）；RebutPanel 主行=风格/立场/格式/字数+生成回答，引用/检索/坐标/谬误进高级折叠；评价隐藏立场；黑名单笔法灰显+切立场自动回落+toast
+- 门禁：pytest 76 绿 · tsc 零错误 · vite 过
+
+### 批 4（素材组）
+- `sqlite_store.py`：material_groups 表 + basket.group_id 迁移列；公共素材组常在（pinned 保护删改）；旧存量归公共组；删组材料并公共（无孤儿）；存储上限拆除（BASKET_CAP 只作注入预算）
+- `workspace.py`：/api/groups CRUD + basket 加 group_id
+- 前端：RespondFace 左栏组列表（折叠/建组/改名/删组/整组注入/预算 20 勾选守卫）；LibraryFace 右键「加入素材组▸」子菜单 + 文案全量改词；App 导览文案同步
+- 门禁：pytest 77 绿（新 test_groups/test_no_storage_cap）· tsc · vite 过
+
+### 批 5（设置长页族）
+- 2 `config.py` 数据根覆盖（data-root.txt，knowledge.db 健全检查）+`settings.py` 三端点（task-chains PATCH / data-root GET / migrate NDJSON：wal_checkpoint→复制进度→写标记→旧目录保留）；`DataDirSection.tsx` 新建
+- 3 `TaskChainEditor.tsx` 新建（芯片上移/下移/摘除/追加，保存热生效）；任务分工独立成区
+- 11 组件中心：`api/components.py` 新建（四态/zip 断点续传+sha256+镜像轮替+开发态 pip 回落/禁用 .disabled/全库重嵌入 NDJSON）；`config.py` EXTRAS_PATH+MODELS_DIR+mount_extras；`embedder.py` reset_embedder；`ComponentsSection.tsx` 新建；共用 `lib/ndjson.ts` 新建
+- 12 一滚到底：SettingsPanel 十二分区顺铺+锚点导航+scrollspy；新增分区拆进 settings/ 子目录（先拆后补）
+- 门禁：pytest 77 绿 · tsc 零错 · vite 过
+
+### 批 6（导入/归档/阅读器族）
+- 5/6 `ingestion/archiver.py` 新建：archive/{立场}/{作者}/{标题}.md+原件；frontmatter source_format+conversion 三档；撞名版次→年→序号；.archive_index.json 级联；indexer.confirm Stage 9b/reassign 第七处/delete 可选删档；中立评价 archive_neutral_review 入口就位
+- 6 `import_doc.py`：ConfirmRequest.archive/remember + archive-policy GET/PATCH；ImportPanel 确认屏三选（复制/迁移/不归档）+记住选择
+- 7 `parsers.py` OCR 分支（RapidOCR+pypdfium2，文字层<200 字触发；无组件显式报告进 raw_metadata）
+- 8 `parsers.py`：csv 解析（utf-8→gbk→gb18030）+URL 表格全抽取（pandas read_html 可选）+附件链接发现+403 显式报告；SUPPORTED_EXTS+选文件器加 csv
+- 10 `api/files.py` 新建（/docs/{id}/view 格式调度+大表分页 500 行，/files/{id} 原件流）；`ReaderModal.tsx`+`lib/md.ts` 新建（统一外壳/格式徽章/conversion 标注/pdf 原页⇄文本双轨/sheet 页签）；馆藏右键+档案栏「打开原件」入口
+- 门禁：pytest 77 绿 · tsc 零错 · vite 过
+
+### 批 7（收尾）
+- 22 `installer.nsi` skills 目录 SetOverwrite off（存在即跳过，手改不被覆盖）
+- `bump_version.py` 修三 bug（根路径层级/引号丢失/!define 匹配）；版本号五处 0.1.4（config.py/tauri.conf.json/installer.nsi/package.json/Cargo.toml）
+- 打包：PyInstaller onedir ✓ · tauri build（cargo 需手动补 PATH）✓ · makensis（用 Tauri 自带 %LOCALAPPDATA%\tauri\NSIS）→ release\DebateEngine-0.1.4-Setup.exe（112MB）
+- 冒烟自测（打包后引擎 API_PORT=7799）：health=0.1.4 · components 四卡四态 · data-root · archive-policy=ask · groups 含公共素材组 · task-chains PATCH 热生效+offline 拒写 · 优雅关停，全部通过
+
+### 记债追加（批 5/6 执行中产生）
+- 组件 zip 资产（bge-m3/ocr-win64/docling-win64）待随 release 上传后断点续传验收（红线 4 尊重资产就绪后验）；开发态 pip 回落已可用
+- 确认屏附件一并下载提示（决策 8 后半）：attachments 已进 raw_metadata，确认屏 UI 展示待补
+- 23 新特性三步导览文案待补（tour 框架已在）；.xls 老格式阅读器内嵌不支持（提示另存 .xlsx）
+
+（批 7 打包/上传结果执行时追加）
 
 ## 版本执行策略（架构红线同步）
 

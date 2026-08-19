@@ -9,7 +9,7 @@ Unicode true
 
 !define APP_NAME "Debate Engine"
 !define APP_ID "DebateEngine"
-!define APP_VERSION "0.1.3"
+!define APP_VERSION "0.1.4"
 !define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_ID}"
 
 Name "${APP_NAME} ${APP_VERSION}"
@@ -118,9 +118,11 @@ Section "程序主体（必需）" SecMain
     SetOutPath "$INSTDIR\engine"
     File /r "..\dist\DebateEngine\*.*"
 
-    ; 预置 Skill 文件（不覆盖用户已有知识库数据以外的部分）
+    ; 预置 Skill 文件：存在即跳过，不覆盖用户手改的 styles/fallacies/centers/stances（0.1.4 决策 22）
+    SetOverwrite off
     SetOutPath "$INSTDIR\knowledge_base\skills"
     File /r "..\..\knowledge_base\skills\*.*"
+    SetOverwrite on
 
     ; 配置样例与说明
     SetOutPath "$INSTDIR"

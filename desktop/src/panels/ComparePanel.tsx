@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { api } from "../api";
 import type { DocRow } from "../App";
+import Combobox from "../components/Combobox";
 
 interface Row {
   a_claim: string; a_doc: string; a_thinker?: string;
@@ -15,6 +16,7 @@ interface Props {
   compareList: DocRow[];
   notify: (msg: string) => void;
   initialMode?: "docs" | "texts" | "divergence";
+  onShowDoc?: (doc: DocRow) => void;   // 批 2/23：选中项旁「查看」开右栏
 }
 
 const REL_LABEL: Record<string, string> = {
@@ -24,7 +26,7 @@ const REL_LABEL: Record<string, string> = {
 };
 
 export default function ComparePanel({ stances, docs, compareList, notify,
-                                        initialMode }: Props) {
+                                        initialMode, onShowDoc }: Props) {
   const [mode, setMode] = useState<"docs" | "texts" | "divergence">(
     initialMode || "docs");
   const [docA, setDocA] = useState("");
@@ -81,24 +83,34 @@ export default function ComparePanel({ stances, docs, compareList, notify,
         {mode === "docs" && (
           <>
             <label>甲方文档
-              <select value={docA} onChange={(e) => setDocA(e.target.value)}>
-                <option value="">（选择）</option>
-                {docs.map((d) => <option key={d.doc_id} value={d.doc_id}>{d.title || d.doc_id}</option>)}
-              </select>
+              <Combobox width={230} value={docA} onChange={setDocA}
+                        placeholder="（选择）" scopeLabel="馆藏标题/作者"
+                        onView={onShowDoc ? (v) => {
+                          const d = docs.find((x) => x.doc_id === v);
+                          if (d) onShowDoc(d);
+                        } : undefined}
+                        options={docs.map((d) => ({ value: d.doc_id,
+                          label: d.title || d.doc_id,
+                          sub: (d.author as string) || undefined }))} />
             </label>
             <label>乙方文档
-              <select value={docB} onChange={(e) => setDocB(e.target.value)}>
-                <option value="">（选择）</option>
-                {docs.map((d) => <option key={d.doc_id} value={d.doc_id}>{d.title || d.doc_id}</option>)}
-              </select>
+              <Combobox width={230} value={docB} onChange={setDocB}
+                        placeholder="（选择）" scopeLabel="馆藏标题/作者"
+                        onView={onShowDoc ? (v) => {
+                          const d = docs.find((x) => x.doc_id === v);
+                          if (d) onShowDoc(d);
+                        } : undefined}
+                        options={docs.map((d) => ({ value: d.doc_id,
+                          label: d.title || d.doc_id,
+                          sub: (d.author as string) || undefined }))} />
             </label>
           </>
         )}
         {mode === "divergence" && (
           <label>立场
-            <select value={stance} onChange={(e) => setStance(e.target.value)}>
-              {stances.map((s) => <option key={s.name} value={s.name}>{s.label}</option>)}
-            </select>
+            <Combobox width={180} value={stance || stances[0]?.name || ""}
+                      onChange={setStance} scopeLabel="立场名"
+                      options={stances.map((s) => ({ value: s.name, label: s.label }))} />
           </label>
         )}
         <button className="primary" onClick={run} disabled={running || !canRun}>

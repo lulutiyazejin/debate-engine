@@ -20,6 +20,8 @@
 - 不鼓吹暴民暴力
 - 不反制度虚无主义（要夺回制度而非毁掉）
 
+method_blacklist: dialectical, immanent
+
 ## 知识库检索偏好
 - 优先检索: stances/populist/
 - 交叉检索: stances/social_democracy/

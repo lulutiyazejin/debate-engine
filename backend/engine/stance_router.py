@@ -49,6 +49,14 @@ class StanceRouter:
     def route(self, stance: str) -> dict:
         """返回 {doc_ids: [...], weights: {doc_id: float}, excluded: [...]}。
         doc_ids 为空列表表示知识库中没有该立场可检索的文档。"""
+        # 0.1.4 批 3：stance="none"（不站队评价）→ 全库平权，无偏好无排除
+        if stance == "none":
+            docs = self.db.list_documents()
+            ids = [d["doc_id"] for d in docs]
+            return {"doc_ids": ids,
+                    "weights": {i: WEIGHT_CROSS for i in ids},
+                    "excluded": [],
+                    "prefs": {"prefer": [], "cross": [], "exclude": []}}
         skill = self.skills.get_stance(stance)
         prefs = skill.retrieval_prefs if skill else \
             {"prefer": [stance], "cross": [], "exclude": []}

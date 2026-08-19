@@ -1,10 +1,13 @@
 // 知识库面（PLAN-0.1.2 项目10/11/12/13/15）：
 // 顶部检索区（段落/论点/脉络三视角，搜索+溯源合并）+ 左立场树 +
 // 中画布五投影（馆藏/图谱/逻辑链/脉络/对比）+ 右档案卡 + 右键菜单。
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { api } from "../api";
 import type { DocRow, StanceOpt } from "../App";
+import Combobox, { Hl } from "../components/Combobox";
+import DocTree from "../components/DocTree";
+import ReaderModal from "../components/ReaderModal";
 import ComparePanel from "../panels/ComparePanel";
 import GraphPanel from "../panels/GraphPanel";
 import ImportPanel from "../panels/ImportPanel";
@@ -66,6 +69,8 @@ export default function LibraryFace({
   const stanceLabel = useCallback((key: string) =>
     stances.find((s) => s.name === key)?.label || key || "未分类", [stances]);
 
+  // 批 2：分组逻辑已随文档树迁入 DocTree 组件
+
   // ---------- 检索：一次查询双路并发（段落 + 论点/脉络） ----------
   const runSearch = useCallback(async (term?: string) => {
     const query = (term ?? q).trim();
@@ -100,16 +105,28 @@ export default function LibraryFace({
 
   const addBasket = useCallback(async (
     type: "chunk" | "arg_unit" | "document", refId: string,
-    excerpt: string, source: string) => {
+    excerpt: string, source: string, groupId?: number) => {
     try {
       const r = await api.post<{ duplicated: boolean }>("/api/basket",
-        { item_type: type, ref_id: refId, excerpt, source });
-      notify(r.duplicated ? "已在素材篮中" : "已加入素材篮");
+        { item_type: type, ref_id: refId, excerpt, source,
+          group_id: groupId ?? null });
+      notify(r.duplicated ? "已在素材组中" : "已加入素材组");
       basketChanged();
     } catch (e) {
       notify(`加入失败: ${e}`);
     }
   }, [notify, basketChanged]);
+
+  // 批 4：组列表（右键子菜单用）
+  const [groups, setGroups] = useState<{ id: number; name: string }[]>([]);
+  // 0.1.4 批 6：阅读器开关（doc_id）
+  const [readerDoc, setReaderDoc] = useState<string | null>(null);
+  useEffect(() => {
+    if (active) {
+      api.get<{ groups: { id: number; name: string }[] }>("/api/groups")
+        .then((r) => setGroups(r.groups)).catch(() => {});
+    }
+  }, [active]);
 
   const showDossier = useCallback(async (doc: DocRow) => {
     setDossier(doc);
@@ -136,8 +153,10 @@ export default function LibraryFace({
       respondWith(undefined, doc.stance);
       notify(`已切到回应面（立场：${stanceLabel(doc.stance || "")}）`);
     } else if (action === "basket") {
+      // 批 4：子菜单选组（sub=组 id）；无 sub 时落公共组
       addBasket("document", doc.doc_id,
-                doc.summary || doc.title || doc.doc_id, doc.title || doc.doc_id);
+                doc.summary || doc.title || doc.doc_id, doc.title || doc.doc_id,
+                sub ? Number(sub) : undefined);
     } else if (action === "compare") {
       setCompareList((prev) => prev.some((d) => d.doc_id === doc.doc_id)
         ? prev : [...prev, doc]);
@@ -146,8 +165,10 @@ export default function LibraryFace({
     } else if (action === "chain") {
       setChainAnchor(doc.title || doc.doc_id);
       setView("chain");
+    } else if (action === "read") {
+      setReaderDoc(doc.doc_id);   // 0.1.4 批 6：统一阅读器
     } else if (action === "delete") {
-      if (!window.confirm(`确定删除「${doc.title || doc.doc_id}」？\n将级联清除章节、切块、向量与归档文件。`)) return;
+      if (!window.confirm(`确定删除「${doc.title || doc.doc_id}」？\n将级联清除章节、切块、向量；档案库归档默认保留。`)) return;
       try {
         await api.del(`/api/import/${doc.doc_id}`);
         notify("已删除");
@@ -156,16 +177,6 @@ export default function LibraryFace({
       } catch (e) { notify(`删除失败: ${e}`); }
     }
   }, [notify, refreshDocs, stanceLabel, respondWith, addBasket, dossier]);
-
-  const groups = useMemo(() => {
-    const g = new Map<string, DocRow[]>();
-    for (const d of docs) {
-      const k = d.stance || "";
-      if (!g.has(k)) g.set(k, []);
-      g.get(k)!.push(d);
-    }
-    return g;
-  }, [docs]);
 
   const hasSearch = paraHits !== null || unitHits !== null;
 
@@ -179,10 +190,10 @@ export default function LibraryFace({
                  if (e.key === "Enter") runSearch();
                  if (e.key === "Escape") { setQ(""); setParaHits(null); setUnitHits(null); }
                }} />
-        <select value={fStance} onChange={(e) => setFStance(e.target.value)}>
-          <option value="">全部立场</option>
-          {stances.map((s) => <option key={s.name} value={s.name}>{s.label}</option>)}
-        </select>
+        <Combobox width={170} value={fStance} onChange={setFStance}
+                  placeholder="全部立场" scopeLabel="立场名"
+                  options={[{ value: "", label: "全部立场" },
+                            ...stances.map((s) => ({ value: s.name, label: s.label }))]} />
         <input className="year-input" value={yearFrom} placeholder="起始年"
                onChange={(e) => setYearFrom(e.target.value.replace(/\D/g, ""))} />
         <input className="year-input" value={yearTo} placeholder="截止年"
@@ -193,41 +204,7 @@ export default function LibraryFace({
       </div>
 
       <div className="lib-body">
-        {/* 左栏：统计头 + 立场树 */}
-        <aside className="lib-left">
-          <div className="stat-head">
-            <div className="stat"><b>{stats.documents ?? 0}</b><span>文档</span></div>
-            <div className="stat"><b>{stats.chunks ?? 0}</b><span>切块</span></div>
-            <div className="stat"><b>{stats.arg_units ?? 0}</b><span>论证单元</span></div>
-          </div>
-          <div className="tree">
-            {docs.length === 0 && (
-              <div className="empty-state">
-                <p>知识库还是空的</p>
-                <button className="link" onClick={() => setView("collection")}>
-                  去「馆藏」导入第一篇文档 →</button>
-              </div>
-            )}
-            {[...groups.entries()].map(([st, list]) => (
-              <div key={st || "none"} className="tree-group">
-                <div className="tree-stance">
-                  <i className="stance-dot" data-stance={st} />
-                  {stanceLabel(st)} <span className="muted">({list.length})</span>
-                </div>
-                {list.map((d) => (
-                  <div key={d.doc_id}
-                       className={"tree-doc" + (dossier?.doc_id === d.doc_id ? " sel" : "")}
-                       title={d.summary || ""}
-                       onClick={() => showDossier(d)}
-                       onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, doc: d }); }}>
-                    {d.title || d.doc_id}
-                    {(d as { origin?: string }).origin === "self" && <span className="self-tag">自产</span>}
-                  </div>
-                ))}
-              </div>
-            ))}
-          </div>
-        </aside>
+        {/* 批 2/项目 22：常驻左栏已退役，文档树迁入馆藏主从布局 */}
 
         {/* 中央：检索结果 或 画布投影 */}
         <main className="lib-center">
@@ -249,7 +226,7 @@ export default function LibraryFace({
                 <div className="ledger">
                   {(paraHits ?? []).map((c) => (
                     <div key={c.chunk_id} className="ledger-row">
-                      <div className="ledger-text">{c.text.slice(0, 260)}</div>
+                      <div className="ledger-text"><Hl text={c.text.slice(0, 260)} query={q} /></div>
                       <div className="ledger-meta">
                         <span className="muted">{docs.find((d) => d.doc_id === c.doc_id)?.title || c.doc_id}</span>
                         <button className="link" onClick={() => {
@@ -259,7 +236,7 @@ export default function LibraryFace({
                         <button className="link" onClick={() =>
                           addBasket("chunk", c.chunk_id, c.text.slice(0, 400),
                                     docs.find((d) => d.doc_id === c.doc_id)?.title || c.doc_id)}>
-                          加入素材篮</button>
+                          加入素材组</button>
                       </div>
                     </div>
                   ))}
@@ -270,13 +247,13 @@ export default function LibraryFace({
                 <div className="ledger">
                   {(unitHits ?? []).map((r) => (
                     <div key={r.arg_id} className="ledger-row">
-                      <div className="ledger-text">{r.claim}</div>
+                      <div className="ledger-text"><Hl text={r.claim || ""} query={q} /></div>
                       <div className="ledger-meta">
                         <span className="muted">{r.thinker || "—"} · {r.doc_title || r.doc_id} · {r.year ?? "年代不详"}</span>
                         <button className="link" onClick={() => { setChainAnchor(r.claim || ""); setView("chain"); setParaHits(null); setUnitHits(null); }}>看逻辑链</button>
                         <button className="link" onClick={() =>
                           addBasket("arg_unit", r.arg_id, r.claim || "", r.thinker || r.doc_title || "")}>
-                          加入素材篮</button>
+                          加入素材组</button>
                       </div>
                     </div>
                   ))}
@@ -303,11 +280,23 @@ export default function LibraryFace({
               </div>
               <div className="lib-canvas">
                 {view === "collection" && (
-                  <ImportPanel stances={stances} notify={notify} onDone={refreshDocs} />
+                  <div className="coll-split">
+                    {/* 批 2/项目 22：文档树收进馆藏主从布局，知识库面去常驻左栏 */}
+                    <aside className="coll-tree">
+                      <DocTree docs={docs} stances={stances} stats={stats}
+                               selectedId={dossier?.doc_id}
+                               onSelect={showDossier}
+                               onContext={(e, d) => setMenu({ x: e.clientX, y: e.clientY, doc: d })} />
+                    </aside>
+                    <div className="coll-main">
+                      <ImportPanel stances={stances} notify={notify} onDone={refreshDocs} />
+                    </div>
+                  </div>
                 )}
                 {view === "graph" && (
                   <GraphPanel stances={stances} docs={docs} notify={notify}
                               active={active && view === "graph"}
+                              onShowDoc={showDossier}
                               onChain={(anchor) => { setChainAnchor(anchor); setView("chain"); }} />
                 )}
                 {view === "chain" && (
@@ -319,7 +308,8 @@ export default function LibraryFace({
                 )}
                 {view === "compare" && (
                   <ComparePanel stances={stances} docs={docs}
-                                compareList={compareList} notify={notify} />
+                                compareList={compareList} notify={notify}
+                                onShowDoc={showDossier} />
                 )}
               </div>
             </>
@@ -338,11 +328,12 @@ export default function LibraryFace({
               {dossier.author ? <div><span className="muted">作者</span> {String(dossier.author)}</div> : null}
               {dossier.summary ? <div className="dossier-summary">{String(dossier.summary)}</div> : null}
               <div className="dossier-actions">
+                <button className="link" onClick={() => setReaderDoc(dossier.doc_id)}>打开原件</button>
                 <button className="link" onClick={() => respondWith(undefined, dossier.stance)}>作为回应立场</button>
                 <button className="link" onClick={() =>
                   addBasket("document", dossier.doc_id,
                             dossier.summary || dossier.title || dossier.doc_id,
-                            dossier.title || dossier.doc_id)}>加入素材篮</button>
+                            dossier.title || dossier.doc_id)}>加入素材组</button>
               </div>
             </div>
             <div className="side-body">{preview}</div>
@@ -355,10 +346,12 @@ export default function LibraryFace({
         <div className="ctx-menu" style={{ left: menu.x, top: menu.y }}
              onClick={(e) => e.stopPropagation()}>
           {[
+            { key: "read", label: "打开原件（阅读器）" },
             { key: "reassign", label: "修改分类",
               submenu: stances.map((s) => ({ key: s.name, label: s.label })) },
             { key: "as-source", label: "作为回应立场" },
-            { key: "basket", label: "加入素材篮" },
+            { key: "basket", label: "加入素材组",
+              submenu: groups.map((g) => ({ key: String(g.id), label: g.name })) },
             { key: "compare", label: "加入对比" },
             { key: "chain", label: "查看逻辑链" },
             { key: "delete", label: "删除文档", danger: true },
@@ -380,6 +373,9 @@ export default function LibraryFace({
           ))}
         </div>
       )}
+
+      {/* 0.1.4 批 6：统一阅读器（查看与入库分家） */}
+      {readerDoc && <ReaderModal docId={readerDoc} onClose={() => setReaderDoc(null)} />}
     </div>
   );
 }

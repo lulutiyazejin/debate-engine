@@ -22,11 +22,30 @@ class TestBasket:
         assert db.basket_remove(items[0]["id"]) == 1
         assert db.basket_list() == []
 
-    def test_cap(self, db):
-        for i in range(db.BASKET_CAP):
+    def test_no_storage_cap(self, db):
+        # 0.1.4 批 4：存储无上限（BASKET_CAP 只是注入预算，不再限存储）
+        for i in range(db.BASKET_CAP + 5):
             db.basket_add("chunk", f"c{i}", f"证据{i}")
+        assert len(db.basket_list()) == db.BASKET_CAP + 5
+
+    def test_groups(self, db):
+        # 公共素材组常在且置顶；素材缺省归公共组
+        groups = db.group_list()
+        assert groups[0]["pinned"] == 1 and groups[0]["name"] == db.PUBLIC_GROUP
+        pub = groups[0]["id"]
+        db.basket_add("chunk", "g1", "默认入公共组")
+        assert db.basket_list()[0]["group_id"] == pub
+        # 建组 → 指定组入料 → 删组材料并入公共组（无孤儿）
+        g = db.group_add("经济学")
+        db.basket_add("chunk", "g2", "组内素材", group_id=g["id"])
         with pytest.raises(ValueError):
-            db.basket_add("chunk", "overflow", "超限")
+            db.group_add("经济学")          # 重名拒绝
+        with pytest.raises(ValueError):
+            db.group_delete(pub)            # 公共组不可删
+        moved = db.group_delete(g["id"])
+        assert moved["moved"] == 1
+        rows = db.basket_list()
+        assert all(r["group_id"] == pub for r in rows)
 
 
 class TestResponses:

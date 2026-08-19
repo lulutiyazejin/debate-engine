@@ -1,14 +1,17 @@
 // 设置面板（PLAN-0.1.2 项目23）：覆盖浮层内的六分区左导航。
 // A 模型服务商（任务分工总览+自定义服务商）· B 生成与检索参数 · C 知识库 ·
 // D 知识文件 · E 诊断与日志 · F 界面（主题/悬浮组/手势/快捷键）
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type UIEvent as ReactUIEvent } from "react";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { api, engineBase } from "../api";
 import { loadKeys } from "../App";
-import { getThemePref, setThemePref, type ThemePref } from "../theme";
+import { getThemePref, setThemePref, type ThemePref,
+         ACCENT_PRESETS, getAccentHue, setAccentHue } from "../theme";
+import TaskChainEditor, { type TaskRow } from "./settings/TaskChainEditor";
+import DataDirSection from "./settings/DataDirSection";
+import ComponentsSection from "./settings/ComponentsSection";
 
 interface Provider { name: string; configured: boolean; available: boolean; model?: string }
-interface TaskRow { task: string; label: string; chain: string[]; active: string }
 interface CustomProv { name: string; url: string; model: string; tasks: string[]; has_key: boolean }
 interface OllamaStatus {
   running: boolean; hint?: string; installed_models: string[];
@@ -29,7 +32,9 @@ const PROVIDER_LABELS: Record<string, string> = {
 const SECTIONS = [
   { key: "providers", label: "模型服务商" },
   { key: "localmodel", label: "本地模型" },
+  { key: "components", label: "组件中心" },
   { key: "network", label: "网络与代理" },
+  { key: "tasks", label: "任务分工" },
   { key: "params", label: "生成与检索" },
   { key: "kb", label: "知识库" },
   { key: "stancemgr", label: "立场管理" },
@@ -60,6 +65,7 @@ export default function SettingsPanel({ notify }: Props) {
   const [overrideEdit, setOverrideEdit] = useState<string | null>(null);
   const [overrideModel, setOverrideModel] = useState("");
   const [theme, setTheme] = useState<ThemePref>(getThemePref());
+  const [accentHue, setAccentHueState] = useState<number>(getAccentHue());
   const [gestureOn, setGestureOn] = useState(() => localStorage.getItem("de.gesture") !== "off");
   const [gestureInv, setGestureInv] = useState(() => localStorage.getItem("de.gesture.invert") === "1");
   const [keySwitch, setKeySwitch] = useState(loadKeys().switch);
@@ -367,32 +373,31 @@ export default function SettingsPanel({ notify }: Props) {
     </div>
   );
 
+  // 0.1.4 批 5（决策 12）：一滚到底——左导航变锚点目录，scrollspy 高亮当前分区
+  const onSpy = (e: ReactUIEvent<HTMLDivElement>) => {
+    const hostTop = e.currentTarget.getBoundingClientRect().top;
+    let cur: string = SECTIONS[0].key;
+    for (const s of SECTIONS) {
+      const el = document.getElementById(`sec-${s.key}`);
+      if (el && el.getBoundingClientRect().top - hostTop <= 90) cur = s.key;
+    }
+    setSection(cur);
+  };
+
   return (
     <div className="settings2">
       <nav className="settings-nav">
         {SECTIONS.map((s) => (
           <button key={s.key} className={section === s.key ? "nav-on" : ""}
-                  onClick={() => setSection(s.key)}>{s.label}</button>
+                  onClick={() => { setSection(s.key);
+                    document.getElementById(`sec-${s.key}`)
+                      ?.scrollIntoView({ behavior: "smooth", block: "start" }); }}>
+            {s.label}</button>
         ))}
       </nav>
-      <div className="settings-body">
-        {section === "providers" && (
-          <div className="panel settings">
-            <h3>任务分工总览</h3>
-            <p className="muted small">每类 AI 任务按优先级链依次尝试；全部不可用时降级离线模板。</p>
-            <table className="task-table">
-              <thead><tr><th>任务</th><th>用途</th><th>优先级链</th><th>当前落点</th></tr></thead>
-              <tbody>
-                {tasks.map((t) => (
-                  <tr key={t.task}>
-                    <td><code>{t.task}</code></td>
-                    <td>{t.label}</td>
-                    <td className="muted">{t.chain.join(" → ")}</td>
-                    <td><span className={"badge " + (t.active === "offline" ? "warn" : "ok")}>{t.active}</span></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      <div className="settings-body" onScroll={onSpy}>
+        {(
+          <div className="panel settings" id="sec-providers">
             <h3>内置服务商</h3>
             <p className="muted small">Key 保存在本机 .env，不上传；保存后热重载无需重启。</p>
             <div className="provider-list">{providers.map(provCard)}</div>
@@ -440,8 +445,8 @@ export default function SettingsPanel({ notify }: Props) {
           </div>
         )}
 
-        {section === "localmodel" && (
-          <div className="panel settings">
+        {(
+          <div className="panel settings" id="sec-localmodel">
             <h3>本地模型（Ollama）</h3>
             {!ollama ? <p className="muted small">探测中…</p> : <>
               <div className="param-row"><span>运行状态</span>
@@ -478,8 +483,12 @@ export default function SettingsPanel({ notify }: Props) {
           </div>
         )}
 
-        {section === "network" && (
-          <div className="panel settings">
+        <div className="panel settings" id="sec-components">
+          <ComponentsSection notify={notify} />
+        </div>
+
+        {(
+          <div className="panel settings" id="sec-network">
             <h3>代理</h3>
             <p className="muted small">
               作用于全部外发请求（模型 API / 维基百科 / 百度百科）；
@@ -525,8 +534,16 @@ export default function SettingsPanel({ notify }: Props) {
           </div>
         )}
 
-        {section === "params" && (
-          <div className="panel settings">
+        <div className="panel settings" id="sec-tasks">
+          <h3>任务分工总览</h3>
+          <p className="muted small">每类 AI 任务按优先级链依次尝试；全部不可用时降级离线模板。点「编辑链」调整顺序，保存即热生效。</p>
+          <TaskChainEditor tasks={tasks} notify={notify} onSaved={refresh}
+                           providerNames={[...providers.map((p) => p.name),
+                                           ...customs.map((c) => c.name)]} />
+        </div>
+
+        {(
+          <div className="panel settings" id="sec-params">
             <h3>生成与检索参数</h3>
             <p className="muted small">写入 settings.json 并立即热生效（跟知识库走，分享包不含）。</p>
             {[
@@ -545,8 +562,8 @@ export default function SettingsPanel({ notify }: Props) {
           </div>
         )}
 
-        {section === "kb" && (
-          <div className="panel settings">
+        {(
+          <div className="panel settings" id="sec-kb">
             <h3>知识库统计</h3>
             <div className="stat-head">
               <div className="stat"><b>{stats.documents ?? 0}</b><span>文档</span></div>
@@ -563,11 +580,12 @@ export default function SettingsPanel({ notify }: Props) {
               <button disabled={kbBusy} onClick={importKb}>导入分享包…</button>
               {kbBusy && <span className="muted small">处理中…</span>}
             </div>
+            <DataDirSection notify={notify} />
           </div>
         )}
 
-        {section === "stancemgr" && (
-          <div className="panel settings">
+        {(
+          <div className="panel settings" id="sec-stancemgr">
             <h3>立场清单</h3>
             <p className="muted small">预置立场随包分发不可删；手动导入的立场可删除（文档不受影响）。</p>
             <div className="ledger">
@@ -602,8 +620,8 @@ export default function SettingsPanel({ notify }: Props) {
           </div>
         )}
 
-        {section === "skills" && (
-          <div className="panel settings">
+        {(
+          <div className="panel settings" id="sec-skills">
             <h3>知识文件</h3>
             <p className="muted small">
               反驳风格（styles.md）、谬误表（fallacies.md）、坐标中心点（centers.md）、
@@ -613,8 +631,8 @@ export default function SettingsPanel({ notify }: Props) {
           </div>
         )}
 
-        {section === "diag" && (
-          <div className="panel settings">
+        {(
+          <div className="panel settings" id="sec-diag">
             <h3>服务商可用性</h3>
             <div className="ledger">
               {providers.map((p) => (
@@ -638,8 +656,8 @@ export default function SettingsPanel({ notify }: Props) {
           </div>
         )}
 
-        {section === "ui" && (
-          <div className="panel settings">
+        {(
+          <div className="panel settings" id="sec-ui">
             <h3>主题</h3>
             <div className="controls">
               {([["dark", "深色"], ["light", "浅色"], ["system", "跟随系统"]] as const).map(([v, l]) => (
@@ -650,6 +668,21 @@ export default function SettingsPanel({ notify }: Props) {
               ))}
             </div>
             <p className="muted small">窗口标题栏随主题同步变色；导出的报告 HTML 固定纸感浅色（出版惯例）。</p>
+            <h3>主色</h3>
+            <div className="controls">
+              {ACCENT_PRESETS.map((p) => (
+                <button key={p.hue} className="swatch" title={p.name}
+                        style={{ background: `oklch(0.55 0.15 ${p.hue}deg)`,
+                                 outline: accentHue === p.hue ? "2px solid var(--tx-1)" : "none" }}
+                        onClick={() => { setAccentHueState(p.hue); setAccentHue(p.hue);
+                                         notify(`主色已切换：${p.name}`); }} />
+              ))}
+              <input type="range" min={0} max={359} value={accentHue}
+                     title="自定义色相"
+                     onChange={(e) => { const h = Number(e.target.value);
+                                        setAccentHueState(h); setAccentHue(h); }} />
+            </div>
+            <p className="muted small">只换强调色相；关闭钮红点、立场色、导出报告不受影响。</p>
             <h3>窗口</h3>
             <label className="chk">
               <input type="checkbox" checked={winMem}
@@ -689,8 +722,8 @@ export default function SettingsPanel({ notify }: Props) {
           </div>
         )}
 
-        {section === "about" && (
-          <div className="panel settings">
+        {(
+          <div className="panel settings" id="sec-about">
             <h3>软件信息</h3>
             <div className="param-row"><span>名称</span><span>Debate Engine（辩论引擎）</span></div>
             <div className="param-row"><span>版本</span><code>{version || "读取中…"}</code></div>

@@ -12,6 +12,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import config
 from api.deps import get_indexer
 from ingestion.indexer import PENDING, collect_sources
 from ingestion.web_enrich import enrich, enrichment_enabled
@@ -33,6 +34,9 @@ class ConfirmRequest(BaseModel):
     stance: str = Field(min_length=1)
     on_duplicate: str = Field(default="keep-both",
                               pattern="^(skip|replace|keep-both)$")
+    # 0.1.4 批 6：归档三选（缺省读 settings archive_policy）+「记住选择」
+    archive: str | None = Field(default=None, pattern="^(copy|move|none)$")
+    remember: bool = False
 
 
 class BatchRequest(BaseModel):
@@ -60,7 +64,9 @@ def import_preview(req: ImportRequest):
 
 @router.post("/import/confirm")
 def import_confirm(req: ConfirmRequest):
-    """Stage 7-10：用户确认立场后完成入库（含查重处置）。"""
+    """Stage 7-10：用户确认立场后完成入库（含查重处置 + 归档三选）。"""
+    if req.remember and req.archive:
+        config.save_settings({"archive_policy": req.archive})
     pv = PENDING.get(req.doc_id)
     if pv is None:
         raise HTTPException(404,
@@ -73,7 +79,7 @@ def import_confirm(req: ConfirmRequest):
                 pv = idx.preview(pv.source)   # exact 预览短路过，补跑完整分析
         elif pv.duplicate["type"] == "exact":
             raise HTTPException(409, "完全重复文档，on_duplicate=replace 才能重新入库")
-    return idx.confirm(pv, req.stance)
+    return idx.confirm(pv, req.stance, archive=req.archive)
 
 
 def _run_batch(req: BatchRequest) -> None:
@@ -123,9 +129,29 @@ def import_progress():
 
 
 @router.delete("/import/{doc_id}")
-def delete_doc(doc_id: str):
-    """级联删除：SQLite 四表 + FTS + 向量库 + meta.json。"""
-    counts = get_indexer().delete_document(doc_id)
+def delete_doc(doc_id: str, archive: str = "keep"):
+    """级联删除：SQLite 四表 + FTS + 向量库 + meta.json；
+    archive=delete 才连档案库一起删（默认保留，0.1.4 决策 6）。"""
+    counts = get_indexer().delete_document(doc_id,
+                                           delete_archive=archive == "delete")
     if counts.get("documents", 0) == 0:
         raise HTTPException(404, f"文档不存在: {doc_id}")
     return {"doc_id": doc_id, "deleted": counts}
+
+
+# ---------- 0.1.4 批 6（决策 6）：归档策略 ----------
+
+class PolicyPatch(BaseModel):
+    policy: str = Field(pattern="^(ask|copy|move|none)$")
+
+
+@router.get("/import/archive-policy")
+def get_archive_policy():
+    """ask=每次确认屏三选；copy/move/none=记住的默认策略。"""
+    return {"policy": config.load_settings().get("archive_policy") or "ask"}
+
+
+@router.patch("/import/archive-policy")
+def set_archive_policy(req: PolicyPatch):
+    config.save_settings({"archive_policy": req.policy})
+    return {"policy": req.policy}

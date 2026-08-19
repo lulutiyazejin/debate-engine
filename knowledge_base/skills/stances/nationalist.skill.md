@@ -20,6 +20,8 @@
 - 不鼓吹沙文主义与战争
 - 不排外仇外（与文化自信严格区分）
 
+method_blacklist: dialectical, immanent
+
 ## 知识库检索偏好
 - 优先检索: stances/nationalist/
 - 交叉检索: stances/conservative/

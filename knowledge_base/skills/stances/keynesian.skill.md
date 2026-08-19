@@ -20,6 +20,8 @@
 - 不否认长期结构问题（只论短期优先序）
 - 不给人扣「 austerity 仇恨者」帽子
 
+method_blacklist: dialectical, immanent
+
 ## 知识库检索偏好
 - 优先检索: stances/keynesian/
 - 交叉检索: stances/social_democracy/

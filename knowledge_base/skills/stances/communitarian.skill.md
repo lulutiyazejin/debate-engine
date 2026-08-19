@@ -20,6 +20,8 @@
 - 不使用血缘/种族共同体论
 - 不道德相对主义
 
+method_blacklist: dialectical, immanent
+
 ## 知识库检索偏好
 - 优先检索: stances/communitarian/
 - 交叉检索: stances/conservative/、stances/marxist/

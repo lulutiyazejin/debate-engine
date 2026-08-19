@@ -9,7 +9,9 @@ import RebutPanel from "../panels/RebutPanel";
 import { ReportPanel } from "../panels/ReportPanel";
 
 interface BasketItem { id: number; item_type: string; ref_id: string;
-                       excerpt: string; source: string; used: number }
+                       excerpt: string; source: string; used: number;
+                       group_id?: number }
+interface Group { id: number; name: string; pinned: number; count: number }
 interface HistoryItem { id: number; intent: string; stance: string;
                         input_text: string; output_text: string;
                         provider: string; starred: number; created_at: string }
@@ -18,30 +20,31 @@ interface Props {
   stances: StanceOpt[];
   active: boolean;
   notify: (msg: string) => void;
-  prefill: { stance?: string; argument?: string };
+  prefill: { stance?: string; argument?: string; style?: string };
   basketVersion: number;
   basketChanged: () => void;
   onSaved: () => void;
 }
 
 const INTENTS = [
-  { key: "rebut", label: "反驳" },
-  { key: "critique", label: "批判" },
-  { key: "evaluate", label: "评价" },
+  { key: "answer", label: "回答" },
   { key: "analyze", label: "分析" },
   { key: "report", label: "综合报告" },
 ] as const;
 
+// 历史记录旧意图词汇保留显示映射（批 3：三意图已并入回答风格表）
 const INTENT_NAME: Record<string, string> = {
   rebut: "反驳", critique: "批判", evaluate: "评价",
-  analyze: "分析", report: "报告",
+  analyze: "分析", report: "报告", answer: "回答",
 };
 
 export default function RespondFace({
   stances, notify, prefill, basketVersion, basketChanged, onSaved,
 }: Props) {
-  const [intent, setIntent] = useState("rebut");
+  const [intent, setIntent] = useState("answer");
   const [basket, setBasket] = useState<BasketItem[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]);          // 批 4：素材组
+  const [groupFold, setGroupFold] = useState<number[]>([]);
   const [selected, setSelected] = useState<number[]>([]);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [histSel, setHistSel] = useState<HistoryItem | null>(null);
@@ -53,8 +56,12 @@ export default function RespondFace({
 
   const loadBasket = useCallback(async () => {
     try {
-      const r = await api.get<{ items: BasketItem[] }>("/api/basket");
+      const [r, g] = await Promise.all([
+        api.get<{ items: BasketItem[] }>("/api/basket"),
+        api.get<{ groups: Group[] }>("/api/groups"),
+      ]);
       setBasket(r.items);
+      setGroups(g.groups);
       setSelected((prev) => prev.filter((id) => r.items.some((i) => i.id === id)));
     } catch { /* 引擎启动前静默 */ }
   }, []);
@@ -73,6 +80,52 @@ export default function RespondFace({
     await api.del(`/api/basket/${id}`).catch((e) => notify(`删除失败: ${e}`));
     loadBasket();
     basketChanged();
+  };
+
+  // ---------- 素材组操作（批 4） ----------
+  const toggleSelect = (id: number, on: boolean) => {
+    setSelected((prev) => {
+      if (!on) return prev.filter((x) => x !== id);
+      if (prev.length >= 20) {
+        notify("单次注入预算已满（20 条，prompt 物理限制）");
+        return prev;
+      }
+      return [...prev, id];
+    });
+  };
+
+  const injectGroup = (items: BasketItem[]) => {
+    setSelected((prev) => {
+      const merged = [...prev];
+      for (const it of items) {
+        if (merged.length >= 20) { notify("注入预算已满（20 条），其余未勾选"); break; }
+        if (!merged.includes(it.id)) merged.push(it.id);
+      }
+      return merged;
+    });
+  };
+
+  const addGroup = async () => {
+    const name = window.prompt("新素材组名称：");
+    if (!name?.trim()) return;
+    try { await api.post("/api/groups", { name: name.trim() }); loadBasket(); }
+    catch (e) { notify(`建组失败: ${e}`); }
+  };
+
+  const renameGroup = async (g: Group) => {
+    const name = window.prompt("组改名：", g.name);
+    if (!name?.trim() || name.trim() === g.name) return;
+    try { await api.patch(`/api/groups/${g.id}`, { name: name.trim() }); loadBasket(); }
+    catch (e) { notify(`改名失败: ${e}`); }
+  };
+
+  const deleteGroup = async (g: Group) => {
+    if (!window.confirm(`删除组「${g.name}」？组内素材不会删除，将并入公共素材组。`)) return;
+    try {
+      const r = await api.del<{ moved: number }>(`/api/groups/${g.id}`);
+      notify(`组已删，${r.moved} 条素材并入公共素材组`);
+      loadBasket();
+    } catch (e) { notify(`删组失败: ${e}`); }
   };
 
   const toggleStar = async (h: HistoryItem) => {
@@ -109,30 +162,61 @@ export default function RespondFace({
 
   return (
     <div className="resp-face">
-      {/* 左栏：素材篮 + 历史 */}
+      {/* 左栏：素材组（批 4）+ 历史 */}
       <aside className="resp-left">
         <div className="col-head">
-          素材篮 <span className="muted small">{basket.length}/20 · 勾选注入生成</span>
+          素材组 <span className="muted small">已选 {selected.length}/20 · 勾选注入生成</span>
         </div>
         <div className="basket-list">
-          {basket.length === 0 && (
+          {basket.length === 0 && groups.length <= 1 && (
             <div className="empty-state small">
-              <p>素材篮是空的</p>
-              <p className="muted small">在知识库面的检索结果、图谱节点或文档右键菜单里「加入素材篮」。</p>
+              <p>素材组是空的</p>
+              <p className="muted small">在知识库面的检索结果、图谱节点或文档右键菜单里「加入素材组」。</p>
             </div>
           )}
-          {basket.map((b) => (
-            <label key={b.id} className={"basket-item" + (b.used ? " used" : "")}>
-              <input type="checkbox" checked={selected.includes(b.id)}
-                     onChange={(e) => setSelected((prev) =>
-                       e.target.checked ? [...prev, b.id] : prev.filter((x) => x !== b.id))} />
-              <span className="basket-text" title={b.excerpt}>
-                {b.excerpt.slice(0, 60)}
-                <i className="muted"> · {b.source || b.item_type}{b.used ? " · 已使用" : ""}</i>
-              </span>
-              <button className="link" onClick={(e) => { e.preventDefault(); removeBasket(b.id); }}>×</button>
-            </label>
-          ))}
+          {groups.map((g) => {
+            const items = basket.filter((b) => b.group_id === g.id);
+            const folded = groupFold.includes(g.id);
+            return (
+              <div key={g.id} className="mat-group">
+                <div className="tree-stance" onClick={() =>
+                  setGroupFold((prev) => prev.includes(g.id)
+                    ? prev.filter((x) => x !== g.id) : [...prev, g.id])}>
+                  <svg width="10" height="10" viewBox="0 0 10 10"
+                       style={{ transform: folded ? "rotate(-90deg)" : "none" }}>
+                    <path d="M2 3.5l3 3 3-3" fill="none" stroke="currentColor"
+                          strokeWidth="1.4" strokeLinecap="round" />
+                  </svg>
+                  {g.name} <span className="muted">({items.length})</span>
+                  <span className="spacer" />
+                  {items.length > 0 && (
+                    <button className="link" title="整组注入"
+                            onClick={(e) => { e.stopPropagation(); injectGroup(items); }}>全选</button>
+                  )}
+                  {!g.pinned && (
+                    <>
+                      <button className="link" title="改名"
+                              onClick={(e) => { e.stopPropagation(); renameGroup(g); }}>改</button>
+                      <button className="link" title="删组（材料并入公共素材组）"
+                              onClick={(e) => { e.stopPropagation(); deleteGroup(g); }}>×</button>
+                    </>
+                  )}
+                </div>
+                {!folded && items.map((b) => (
+                  <label key={b.id} className={"basket-item" + (b.used ? " used" : "")}>
+                    <input type="checkbox" checked={selected.includes(b.id)}
+                           onChange={(e) => toggleSelect(b.id, e.target.checked)} />
+                    <span className="basket-text" title={b.excerpt}>
+                      {b.excerpt.slice(0, 60)}
+                      <i className="muted"> · {b.source || b.item_type}{b.used ? " · 已使用" : ""}</i>
+                    </span>
+                    <button className="link" onClick={(e) => { e.preventDefault(); removeBasket(b.id); }}>×</button>
+                  </label>
+                ))}
+              </div>
+            );
+          })}
+          <button className="link pad-h" onClick={addGroup}>+ 新建素材组</button>
         </div>
 
         <div className="col-head">
@@ -180,9 +264,13 @@ export default function RespondFace({
               </span>
               <button className="link" onClick={() => saveToKb(histSel)}>存入知识库</button>
               <button className="link" onClick={() => {
-                setLocalPrefill({ argument: histSel.input_text, stance: histSel.stance });
+                // 批 3：旧意图回填→回答 tab + 对应风格；analyze/report 回自己的 tab
+                const styleMap: Record<string, string> = {
+                  rebut: "rebuttal", critique: "critique", evaluate: "evaluate" };
+                setLocalPrefill({ argument: histSel.input_text, stance: histSel.stance,
+                                  style: styleMap[histSel.intent] });
                 setIntent(histSel.intent === "analyze" || histSel.intent === "report"
-                  ? "rebut" : histSel.intent);
+                  ? histSel.intent : "answer");
                 setHistSel(null);
               }}>回填重新生成</button>
               <button className="link" onClick={() => setHistSel(null)}>返回 ×</button>
@@ -192,10 +280,10 @@ export default function RespondFace({
           </div>
         ) : (
           <>
-            {(intent === "rebut" || intent === "critique" || intent === "evaluate") && (
+            {intent === "answer" && (
               <RebutPanel stances={stances} prefill={localPrefill}
                           setSide={setSide} setRightOpen={setSideOpen}
-                          notify={notify} intent={intent}
+                          notify={notify}
                           materialIds={selected}
                           onDone={() => { loadHistory(); loadBasket(); basketChanged(); }} />
             )}
