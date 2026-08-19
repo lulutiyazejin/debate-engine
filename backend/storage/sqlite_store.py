@@ -32,6 +32,14 @@ CREATE TABLE IF NOT EXISTS documents (
     provenance  TEXT,
     content_hash TEXT,
     source_path  TEXT,
+    translator   TEXT,
+    publisher    TEXT,
+    edition      TEXT,
+    original_title TEXT,
+    original_lang  TEXT,
+    author_years   TEXT,
+    school       TEXT,
+    manual_fields TEXT,
     created_at   TEXT,
     updated_at   TEXT,
     deleted_at   TEXT
@@ -136,6 +144,15 @@ _MIGRATIONS: list[tuple[str, str, str]] = [
     ("arg_units", "relation", "TEXT"),
     ("arg_units", "target_unit_id", "TEXT"),
     ("arg_units", "created_at", "TEXT"),
+    # 0.1.3 B1：文档元数据扩展（与 _DOC_META_COLS、_SCHEMA 三处同步）
+    ("documents", "translator", "TEXT"),
+    ("documents", "publisher", "TEXT"),
+    ("documents", "edition", "TEXT"),
+    ("documents", "original_title", "TEXT"),
+    ("documents", "original_lang", "TEXT"),
+    ("documents", "author_years", "TEXT"),
+    ("documents", "school", "TEXT"),
+    ("documents", "manual_fields", "TEXT"),
 ]
 
 
@@ -172,14 +189,20 @@ class SqliteStore(MetadataStoreBase):
         self.conn.close()
 
     # ---------- documents ----------
+    # 0.1.3 元数据列（B1）：schema/迁移/本清单三处必须同步，防分享包丢字段
+    _DOC_META_COLS = ("translator", "publisher", "edition", "original_title",
+                      "original_lang", "author_years", "school", "manual_fields")
+    
     def upsert_document(self, doc: dict) -> None:
-        """UPSERT：重复写入保留 created_at，只刷 updated_at（服务器级规范）。"""
+        """UPSERT：重复写入保留 created_at，只更 updated_at（服务器级规范）。"""
+        meta_cols = ",".join(self._DOC_META_COLS)
+        meta_sets = ",".join(f"{c}=excluded.{c}" for c in self._DOC_META_COLS)
         self.conn.execute(
-            """INSERT INTO documents
+            f"""INSERT INTO documents
                (doc_id,title,author,year,stance,secondary_stances,source_type,
                 source_url,import_date,quality_score,summary,provenance,
-                content_hash,source_path,created_at,updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))
+                content_hash,source_path,{meta_cols},created_at,updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,{",".join("?" * len(self._DOC_META_COLS))},datetime('now'),datetime('now'))
                ON CONFLICT(doc_id) DO UPDATE SET
                  title=excluded.title, author=excluded.author, year=excluded.year,
                  stance=excluded.stance,
@@ -189,7 +212,7 @@ class SqliteStore(MetadataStoreBase):
                  quality_score=excluded.quality_score, summary=excluded.summary,
                  provenance=excluded.provenance,
                  content_hash=excluded.content_hash,
-                 source_path=excluded.source_path,
+                 source_path=excluded.source_path,{meta_sets},
                  deleted_at=NULL, updated_at=datetime('now')""",
             (doc["doc_id"], doc.get("title"), doc.get("author"),
              doc.get("year"), doc.get("stance"),
@@ -198,8 +221,36 @@ class SqliteStore(MetadataStoreBase):
              doc.get("import_date"), doc.get("quality_score"),
              doc.get("summary"),
              json.dumps(doc.get("provenance", {}), ensure_ascii=False),
-             doc.get("content_hash"), doc.get("source_path")))
+             doc.get("content_hash"), doc.get("source_path"),
+             *(doc.get(c) for c in self._DOC_META_COLS)))
         self.conn.commit()
+    
+    def update_document_fields(self, doc_id: str, fields: dict) -> bool:
+        """元数据字段级编辑（B5）：白名单列；手动改过的字段记入 manual_fields，
+        联网补充不得覆盖（手动>正文>文件名>网上）。"""
+        allowed = {"title", "author", "year", "stance",
+                   *self._DOC_META_COLS} - {"manual_fields"}
+        sets = {k: v for k, v in fields.items() if k in allowed}
+        if not sets:
+            return False
+        row = self.conn.execute(
+            "SELECT manual_fields FROM documents WHERE doc_id=?",
+            (doc_id,)).fetchone()
+        if row is None:
+            return False
+        try:
+            manual = set(json.loads(row["manual_fields"] or "[]"))
+        except (json.JSONDecodeError, TypeError):
+            manual = set()
+        manual |= set(sets)
+        assign = ",".join(f"{k}=?" for k in sets)
+        self.conn.execute(
+            f"UPDATE documents SET {assign}, manual_fields=?, "
+            "updated_at=datetime('now') WHERE doc_id=?",
+            (*sets.values(), json.dumps(sorted(manual), ensure_ascii=False),
+             doc_id))
+        self.conn.commit()
+        return True
 
     def get_document(self, doc_id: str, include_deleted: bool = False) -> dict | None:
         sql = "SELECT * FROM documents WHERE doc_id=?"

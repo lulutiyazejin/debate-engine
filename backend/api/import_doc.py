@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from api.deps import get_indexer
 from ingestion.indexer import PENDING, collect_sources
+from ingestion.web_enrich import enrich, enrichment_enabled
 
 router = APIRouter(prefix="/api", tags=["import"])
 

@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Debate Engine 0.1.3 · v4 原创图型设计稿</title>
+<style>
+:root{--sans:"Noto Sans SC","Source Han Sans SC","Segoe UI",sans-serif;--mono:"IBM Plex Mono",Consolas,monospace}
+[data-theme="light"]{--bg:#e8e6e1;--ink:#161616;--g1:#565656;--g2:#9b9b9b;--g3:#cfcdc7;--paper:#e8e6e1;--accent:#8a2422}
+[data-theme="dark"]{--bg:#131313;--ink:#e9e7e2;--g1:#a8a8a8;--g2:#666;--g3:#333;--paper:#131313;--accent:#d3543f}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.6 var(--sans)}
+button{font:10px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--g2);background:none;border:none;cursor:pointer}
+button:hover{color:var(--ink)}
+.caps{font:9px var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--g2)}
+.page{max-width:1180px;margin:0 auto;padding:46px 56px 100px}
+.mast{display:flex;align-items:baseline;gap:18px;margin-bottom:26px}
+.mast h1{font:700 16px var(--sans);margin:0}
+.mast button{margin-left:auto}
+.manifesto{max-width:64ch;color:var(--g1);font-size:12.5px;line-height:1.8;margin:0 0 76px;
+ padding-left:14px;border-left:1px solid var(--g2)}
+.ex{margin-bottom:96px}
+.ex h2{font:700 18px/1.3 var(--sans);margin:0 0 3px}
+.ex .how{font:12px/1.55 var(--sans);color:var(--g2);margin:0 0 28px;max-width:74ch}
+.ex svg{display:block;margin:0 auto;width:100%;height:auto}
+.ex .foot{margin-top:24px}
+text{font-family:var(--mono)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:80px}
+@media(max-width:960px){.grid2{display:block}.grid2 .ex{margin-bottom:96px}}
+/* 图标样张 */
+.spec{display:grid;grid-template-columns:repeat(8,1fr);gap:26px;margin:34px 0 8px}
+.spec .cell{text-align:center}
+.spec .cell svg{stroke:var(--ink);fill:none;stroke-width:1.3;stroke-linecap:round;stroke-linejoin:round}
+.spec .nm{display:block;margin-top:8px;font-size:10px;color:var(--g1)}
+.spec .use{display:block;font:8px var(--mono);letter-spacing:.12em;color:var(--g2);text-transform:uppercase;margin-top:2px}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="mast">
+    <h1>Debate Engine · 可视化与图标原创设计稿</h1>
+    <span class="caps">v4 · learned grammar, original forms</span>
+    <button id="themeBtn">theme</button>
+  </div>
+  <p class="manifesto">风格语法取自 mono-editorial：单色灰阶、发丝线、大留白、有序几何、读法副题、caps 字距标签。
+  图型与图标为本软件数据原创：辩论即交火（织）、思想史即沉积（层与岩芯）、立场即拔河（谱）、概念即格子（格）。
+  不复制任何参考项目的现成图型。</p>
+
+  <!-- 图标样张：自绘概念线型图标 -->
+  <div class="ex">
+    <h2>图标样张 · 概念线型 16px</h2>
+    <p class="how">one glyph per concept · 1.3px stroke ·  drawn for this software, not borrowed</p>
+    <div class="spec">
+      <div class="cell"><svg width="26" height="26" viewBox="0 0 16 16"><path d="M3 2.5h10M3 2.5v11h10v-11M6.5 2.5v4l1.5-1.2L9.5 6.5v-4"/></svg><span class="nm">知识库面</span><span class="use">face · library</span></div>
+      <div class="cell"><svg width="26" height="26" viewBox="0 0 16 16"><path d="M2.5 5.5 6 8l-3.5 2.5zM13.5 5.5 10 8l3.5 2.5zM7 8h2"/></svg><span class="nm">回应面</span><span class="use">face · respond</span></div>
+      <div class="cell"><svg width="26" height="26" viewBox="0 0 16 16"><circle cx="4" cy="4" r="1.4"/><circle cx="12" cy="6" r="1.4"/><circle cx="7" cy="12" r="1.4"/><path d="M5.3 4.6 10.7 5.7M4.6 5.3l1.8 5.4M11.2 7.2 7.8 10.9"/></svg><span class="nm">图谱</span><span class="use">graph</span></div>
+      <div class="cell"><svg width="26" height="26" viewBox="0 0 16 16"><rect x="6" y="2" width="4" height="12" rx=".5"/><path d="M6 5.5h4M6 9h4M6 11.5h4M8 2V.8"/></svg><span class="nm">逻辑链</span><span class="use">chain · core</span></div>
+      <div class="cell"><svg width="26" height="26" viewBox="0 0 16 16"><path d="M2 4.5h12M2 8h12M2 11.5h12M9.5 2v12"/></svg><span class="nm">脉络</span><span class="use">strata</span></div>
+      <div class="cell"><svg width="26" height="26" viewBox="0 0 16 16"><path d="M2 5h12M4.5 5v3M8 5v5.5M11.5 5v2"/><circle cx="4.5" cy="9.2" r="1.1"/><circle cx="8" cy="11.7" r="1.1"/><circle cx="11.5" cy="8.2" r="1.1"/></svg><span class="nm">拔河谱</span><span class="use">spectrum</span></div>
+      <div class="cell"><svg width="26" height="26" viewBox="0 0 16 16"><path d="M3.5 6h9l-1.2 7h-6.6zM5.5 6V4.5a2.5 2.5 0 0 1 5 0V6"/></svg><span class="nm">素材篮</span><span class="use">basket</span></div>
+      <div class="cell"><svg width="26" height="26" viewBox="0 0 16 16"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/><circle cx="6" cy="4.5" r="1.2" fill="var(--paper)"/><circle cx="10.5" cy="8" r="1.2" fill="var(--paper)"/><circle cx="4.5" cy="11.5" r="1.2" fill="var(--paper)"/></svg><span class="nm">设置</span><span class="use">settings</span></div>
+    </div>
+    <div class="foot caps">icon specimen · debate-engine original · 1.3px hairline glyphs</div>
+  </div>
+
+  <!-- 展品一：交火织 -->
+  <div class="ex">
+    <h2>交火织：谁在攻击谁</h2>
+    <p class="how">each thread = one attack relation · thread darkness = count · left = attacker · right = attacked · the weave is the texture of a decade of debate</p>
+    <svg id="s1" viewBox="0 0 960 470"></svg>
+    <div class="foot caps">crossfire weave · original form · attack relations as textile</div>
+  </div>
+
+  <div class="grid2">
+    <!-- 展品二：论争地层 -->
+    <div class="ex">
+      <h2>论争地层与岩芯</h2>
+      <p class="how">each band = one decade · dots = argument units sedimented in it · vertical cores = logic chains drilled through the strata · hollow bead on a core = a reversal</p>
+      <svg id="s2" viewBox="0 0 460 470"></svg>
+      <div class="foot caps">argument strata · original form · history of thought as sediment</div>
+    </div>
+    <!-- 展品三：拔河谱 -->
+    <div class="ex">
+      <h2>拔河谱：国家 ←→ 市场</h2>
+      <p class="how">each hanging dot = one argument unit · stem length = evidence weight · dot size = hubness · shaded middle = consensus zone · dashed arc = same-issue opposition</p>
+      <svg id="s3" viewBox="0 0 460 470"></svg>
+      <div class="foot caps">tug-of-war spectrum · original form · stance as pulled rope</div>
+    </div>
+  </div>
+
+  <!-- 展品四：概念格 -->
+  <div class="ex">
+    <h2>概念格：八个核心概念的小倍数</h2>
+    <p class="how">each cell = one core concept · dots inside = argument units invoking it · dot shade = stance family · big number = unit count · read across, not down</p>
+    <svg id="s4" viewBox="0 0 960 430"></svg>
+    <div class="foot caps">concept lattice · small multiples · core concepts of the library</div>
+  </div>
+</div>
+
+<script>
+function rng(seed){return()=>{seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const $=id=>document.getElementById(id);
+const C=()=>{const s=getComputedStyle(document.documentElement);return{ink:s.getPropertyValue('--ink').trim(),g1:s.getPropertyValue('--g1').trim(),g2:s.getPropertyValue('--g2').trim(),g3:s.getPropertyValue('--g3').trim(),paper:s.getPropertyValue('--paper').trim()}};
+
+// 交火织
+function f1(){const c=C(),r=rng(3);let s='';
+ const st=['自由主义','马克思主义','保守主义','社会民主','新自由主义','经验/数据'];
+ const L=170,R=790;
+ st.forEach((n,i)=>{const y=70+i*62;
+  s+=`<text x="${L-16}" y="${y+3}" text-anchor="end" font-size="10" fill="${c.ink}" font-weight="700">${n}</text>`;
+  s+=`<circle cx="${L}" cy="${y}" r="3" fill="${c.ink}"/>`;
+  s+=`<text x="${R+16}" y="${y+3}" font-size="10" fill="${c.ink}" font-weight="700">${n}</text>`;
+  s+=`<circle cx="${R}" cy="${y}" r="3" fill="${c.ink}"/>`});
+ s+=`<line x1="480" y1="40" x2="480" y2="430" stroke="${c.g3}" stroke-width=".6" stroke-dasharray="1 4" opacity=".5"/>`;
+ // 线粗图例（代替不自洽的 net-zero 隐喻）
+ s+=`<g transform="translate(400,452)">
+  <path d="M0,0 C 20,-6 40,-6 60,0" stroke="${c.ink}" stroke-width=".8" opacity=".26" fill="none"/>
+  <text x="68" y="3" font-size="8" fill="${c.g2}">1 attack</text>
+  <path d="M130,0 C 150,-6 170,-6 190,0" stroke="${c.ink}" stroke-width="2.2" opacity=".8" fill="none"/>
+  <text x="198" y="3" font-size="8" fill="${c.g2}">5+ attacks</text></g>`;
+ for(let i=0;i<st.length;i++)for(let j=0;j<st.length;j++){
+  if(i===j)continue;const n=Math.floor(r()*5);if(n<1)continue;
+  const y1=70+i*62,y2=70+j*62;
+  s+=`<path d="M${L},${y1} C 400,${y1+(r()*40-20)} 560,${y2+(r()*40-20)} ${R},${y2}" stroke="${c.ink}" stroke-width="${.5+n*.35}" opacity="${.12+n*.14}" fill="none"/>`}
+ for(let i=0;i<3;i++){const a=Math.floor(r()*6),b=(a+2+Math.floor(r()*3))%6;
+  const y1=70+a*62,y2=70+b*62;
+  s+=`<path d="M${L},${y1} C 400,${y1} 560,${y2} ${R},${y2}" stroke="${c.ink}" stroke-width="2" opacity=".8" fill="none"/>`}
+ $('s1').innerHTML=s}
+
+// 论争地层
+function f2(){const c=C(),r=rng(17);let s='';
+ const dec=['1920s','1940s','1960s','1980s','2000s','2020s'];
+ dec.forEach((d,i)=>{const y=40+i*66;
+  s+=`<line x1="64" y1="${y}" x2="430" y2="${y}" stroke="${c.g3}" stroke-width=".6"/>`;
+  s+=`<text x="10" y="${y+34}" font-size="8" letter-spacing="1.5" fill="${c.g2}">${d}</text>`;
+  for(let k=0;k<14;k++){const x=80+r()*340,yy=y+10+r()*44;
+   s+=`<circle cx="${x.toFixed(0)}" cy="${yy.toFixed(0)}" r="${(1+r()*2.6).toFixed(1)}" fill="${c.ink}" opacity="${(.25+r()*.65).toFixed(2)}"/>`}});
+ s+=`<line x1="64" y1="${40+6*66}" x2="430" y2="${40+6*66}" stroke="${c.g3}" stroke-width=".6"/>`;
+ const cores=[['哈耶克线',150],['马克思线',260],['凯恩斯线',360]];
+ cores.forEach(([nm,x])=>{
+  s+=`<line x1="${x}" y1="26" x2="${x}" y2="${40+6*66}" stroke="${c.ink}" stroke-width="1"/>`;
+  for(let i=0;i<6;i++){const y=40+i*66+8+r()*40;
+   s+=`<rect x="${x-4}" y="${y}" width="8" height="${6+r()*10}" fill="${c.ink}" opacity="${.3+r()*.5}"/>`}
+  s+=`<circle cx="${x}" cy="${40+Math.floor(r()*6)*66+20}" r="3.4" fill="${c.paper}" stroke="${c.ink}" stroke-width="1.2"/>`;
+  s+=`<text x="${x}" y="18" text-anchor="middle" font-size="8" letter-spacing="1.5" fill="${c.ink}" font-weight="700">${nm}</text>`});
+ // 灰阶图例：点的不透明度 = 被引次数
+ s+=`<g transform="translate(64,452)">
+  <circle cx="0" cy="0" r="2" fill="${c.ink}" opacity=".25"/><circle cx="14" cy="0" r="2" fill="${c.ink}" opacity=".55"/><circle cx="28" cy="0" r="2" fill="${c.ink}" opacity=".9"/>
+  <text x="40" y="3" font-size="8" fill="${c.g2}">dot ink = times cited · hollow bead on core = reversal</text></g>`;
+ $('s2').innerHTML=s}
+
+// 拔河谱
+function f3(){const c=C(),r=rng(29);let s='';
+ const y=120;
+ s+=`<rect x="200" y="${y-14}" width="60" height="28" fill="${c.ink}" opacity=".07"/>`;
+ s+=`<line x1="30" y1="${y}" x2="430" y2="${y}" stroke="${c.ink}" stroke-width="1"/>`;
+ for(let i=0;i<=10;i++){const x=30+i*40;
+  s+=`<line x1="${x}" y1="${y-3}" x2="${x}" y2="${y+3}" stroke="${c.ink}" stroke-width=".8"/>`}
+ s+=`<text x="30" y="${y-14}" text-anchor="middle" font-size="8" letter-spacing="2" fill="${c.ink}" font-weight="700">国家</text>`;
+ s+=`<text x="430" y="${y-14}" text-anchor="middle" font-size="8" letter-spacing="2" fill="${c.ink}" font-weight="700">市场</text>`;
+ s+=`<text x="230" y="${y+24}" text-anchor="middle" font-size="7" letter-spacing="1.5" fill="${c.g2}">consensus</text>`;
+ for(let i=0;i<34;i++){const x=40+r()*380;const stem=18+r()*120;const big=r()>.85;
+  s+=`<line x1="${x}" y1="${y}" x2="${x}" y2="${y+stem}" stroke="${c.g1}" stroke-width=".8"/>`;
+  s+=`<circle cx="${x}" cy="${y+stem}" r="${big?4.5:1.6+r()*2}" fill="${c.ink}" opacity="${big?1:.5+r()*.4}"/>`}
+ for(let i=0;i<4;i++){const x1=60+r()*120,x2=280+r()*120;
+  s+=`<path d="M${x1},${y} Q ${(x1+x2)/2},${y-46-r()*30} ${x2},${y}" stroke="${c.g2}" stroke-width=".9" stroke-dasharray="2.5 3.5" fill="none"/>`;
+  s+=`<circle cx="${x1}" cy="${y}" r="2.6" fill="none" stroke="${c.ink}" stroke-width="1.1"/>`;
+  s+=`<circle cx="${x2}" cy="${y}" r="2.6" fill="none" stroke="${c.ink}" stroke-width="1.1"/>`}
+ // 两端堆积密度（拔河双方的"人数"）
+ for(let i=0;i<5;i++){s+=`<line x1="${34+i*5}" y1="${y}" x2="${34+i*5}" y2="${y-8-r()*26}" stroke="${c.ink}" stroke-width="2" opacity="${.3+r()*.5}"/>`;
+  s+=`<line x1="${426-i*5}" y1="${y}" x2="${426-i*5}" y2="${y-8-r()*26}" stroke="${c.ink}" stroke-width="2" opacity="${.3+r()*.5}"/>`}
+ s+=`<text x="30" y="430" font-size="8" letter-spacing="1.5" fill="${c.g2}">ownership axis · 962 units projected</text>`;
+ $('s3').innerHTML=s}
+
+// 概念格
+function f4(){const c=C(),r=rng(43);let s='';
+ const con=['自发秩序','剩余价值','正义','理性','霸权','风险','知识分散','剥削'];
+ const W=228,H=170;
+ con.forEach((nm,i)=>{const cx=20+(i%4)*240,cy=20+Math.floor(i/4)*200;
+  s+=`<rect x="${cx}" y="${cy}" width="${W}" height="${H}" fill="none" stroke="${c.g3}" stroke-width=".6"/>`;
+  const n=6+Math.floor(r()*26);
+  s+=`<text x="${cx+W-14}" y="${cy+34}" text-anchor="end" font-size="20" font-weight="700" fill="${c.ink}">${n}</text>`;
+  s+=`<text x="${cx+14}" y="${cy+26}" font-size="10" font-weight="700" fill="${c.ink}">${nm}</text>`;
+  s+=`<text x="${cx+14}" y="${cy+40}" font-size="7" letter-spacing="1.5" fill="${c.g2}">units invoking</text>`;
+  for(let k=0;k<n;k++){const x=cx+18+r()*(W-36),yy=cy+58+r()*(H-76);
+   s+=`<circle cx="${x.toFixed(0)}" cy="${yy.toFixed(0)}" r="${(1.2+r()*2.2).toFixed(1)}" fill="${c.ink}" opacity="${(.25+r()*.7).toFixed(2)}"/>`}});
+ $('s4').innerHTML=s}
+
+const draw=()=>{f1();f2();f3();f4()};draw();
+$('themeBtn').onclick=()=>{const r=document.documentElement;r.dataset.theme=r.dataset.theme==='light'?'dark':'light';draw()};
+</script>
+</body>
+</html>

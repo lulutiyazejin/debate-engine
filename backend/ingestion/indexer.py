@@ -51,6 +51,8 @@ class ImportPreview:
     content_hash: str = ""
     duplicate: dict | None = None
     arg_units_by_chapter: list[list[dict]] = field(default_factory=list)
+    author_recognized: str | None = None             # 0.1.3 B3
+    web_enrich: dict = field(default_factory=dict)   # {fields, source, reports}
 
     def to_dict(self) -> dict:
         return {"doc_id": self.doc_id, "trace_id": self.trace_id,
@@ -63,7 +65,9 @@ class ImportPreview:
                 "doc_summary": self.doc_summary,
                 "coordinates": self.coordinates,
                 "classification": self.classification,
-                "duplicate": self.duplicate}
+                "duplicate": self.duplicate,
+                "enriched": self.web_enrich.get("author_rule") or "",  # 预览端用 author_rule 行
+                "web_enrich": self.web_enrich}
 
 
 # API 两段式导入的内存暂存区
@@ -117,6 +121,48 @@ class Indexer:
         self.vec = vectors or get_vector_store()
         self.router = router or get_router()
 
+    # ---------- Stage X.5：导入预览扩展（B3） ----------
+    def _enrich_preview(self, pv: ImportPreview) -> ImportPreview:
+        """B3：web_enrich + author_rule；失败不阻塞，返回空 fields+reports。"""
+        from ingestion.web_enrich import enrich as _enrich, enrichment_enabled as _enabled
+        from storage.skill_loader import get_skill_loader
+        try:
+            if not _enabled():
+                pv.web_enrich = {"fields": {}, "source": "", "reports": ["联网补充已关闭"]}
+                return pv
+            title = pv.parsed.summary.get("document_title") or pv.parsed.title
+            author = pv.parsed.author or ""
+            if not author and pv.source:
+                import re, urllib.parse
+                name = urllib.parse.unquote(Path(pv.source).name)
+                m = re.search(r"[\u4e00-\u9fa5]{1,4}(?:著 | 编 | 译)[：:]?\s*([\u4e00-\u9fa5]{2,8})", name)
+                if not m:
+                    m = re.search(r"[\u4e00-\u9fa5]{3,10}", name)
+                if m:
+                    author = m.group(0)
+            # AI 辨认 fallback→规则法（简单版）
+            ai_author = ""
+            try:
+                skill = get_skill_loader().ingestion()
+                prompt = skill.get("author_extract_prompt", "")
+                if prompt:
+                    from models.llm_client import Provider
+                    # 有 Key 就走 AI，无 Key 走规则法
+                    raise ImportError("NoKeyOrFallback")
+            except Exception:
+                pass
+            pv.author_recognized = author or ai_author or ""
+            res = _enrich(author=pv.author_recognized, title=title)
+            pv.web_enrich = res
+            # 只补空值
+            for k in ("translator", "publisher", "school", "author_years"):
+                if not res["fields"].get(k):
+                    res["fields"].pop(k, None)
+        except Exception:
+            pv.web_enrich = {"fields": {}, "source": "", "reports": ["预览扩展失败"]}
+            pv.author_recognized = ""
+        return pv
+
     # ---------- 断点辅助 ----------
     def _done(self, doc_id: str, chapter_id: str, stage: str) -> bool:
         return self.db.get_progress(doc_id, chapter_id, stage) == "done"
@@ -165,6 +211,8 @@ class Indexer:
                 parsed=parsed, chunks=chunks,
                 token_estimate=sum(c.token_count for c in chunks),
                 content_hash=content_hash, duplicate=duplicate)
+            # 0.1.3 B3：web_enrich + author_rule（失败不阻塞）
+            pv = self._enrich_preview(pv)
             PENDING[doc_id] = pv
             return pv
         same_path = self.db.find_by_source_path(str(source))

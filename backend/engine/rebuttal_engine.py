@@ -54,19 +54,29 @@ _CITE_RE = re.compile(r"\[C(\d+)\]")
 
 
 def format_citations(citations: list[dict], fmt: str = "plain") -> list[str]:
-    """引用导出（项目7）：GB/T 7714 / APA / plain。"""
+    """引用导出（项目7；0.1.3 B2 补译者/出版社）。"""
     out = []
     for i, c in enumerate(citations, start=1):
         author, title = c.get("author") or "佚名", c.get("title") or "未知文献"
         year, pages = c.get("year") or "", c.get("pages") or ""
+        translator = c.get("translator") or ""      # 0.1.3 B2
+        publisher = c.get("publisher") or ""        # 0.1.3 B2
         if fmt == "gbt7714":
             s = f"[{i}] {author}. {title}[M]."
             if year:
                 s += f" {year}."
+            if publisher:
+                s += f" {publisher}."
+            if translator:
+                s += f" Translator: {translator}"
             if pages:
-                s += f" {pages}."
+                s += f" Pp.{pages}."
         elif fmt == "apa":
             s = f"{author} ({year or 'n.d.'}). {title}."
+            if publisher:
+                s += f" {publisher}."
+            if translator:
+                s += f" Translated by {translator}."
             if pages:
                 s += f" pp. {pages}."
         else:
@@ -75,6 +85,10 @@ def format_citations(citations: list[dict], fmt: str = "plain") -> list[str]:
                 s += f"({year})"
             if pages:
                 s += f" {pages}"
+            if translator:
+                s += f"（译：{translator}）"
+            if publisher:
+                s += f"·{publisher}"
         out.append(s)
     return out
 

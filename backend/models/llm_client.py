@@ -57,16 +57,19 @@ class Provider:
             headers["Authorization"] = f"Bearer {self.api_key}"
         payload = {"model": self.model, "messages": messages,
                    "max_tokens": max_tokens, "temperature": temperature}
+        # 代理三态（0.1.3 B6）：本地地址永远直连，custom 只走自填地址
+        url = f"{self.base_url}/chat/completions"
+        px = {"proxy": config.httpx_proxy_for(url),
+              "trust_env": config.httpx_trust_env_for(url)}
         with Timer() as t:
             try:
-                r = httpx.post(f"{self.base_url}/chat/completions",
-                               headers=headers, json=payload, timeout=timeout)
+                r = httpx.post(url, headers=headers, json=payload,
+                               timeout=timeout, **px)
             except httpx.ConnectError as e:
                 # 证书审查代理环境：验证失败时降级不验证重试一次
                 if "SSL" in str(e) or "CERTIFICATE" in str(e).upper():
-                    r = httpx.post(f"{self.base_url}/chat/completions",
-                                   headers=headers, json=payload,
-                                   timeout=timeout, verify=False)
+                    r = httpx.post(url, headers=headers, json=payload,
+                                   timeout=timeout, verify=False, **px)
                 else:
                     log_api_call(trace_id, task, self.name, self.model,
                                  "network_error", t.ms, error=str(e))

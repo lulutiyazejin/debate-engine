@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Debate Engine 0.1.3 · 无外框设计稿（v5 纸感 + 呼吸感交互）</title>
+<style>
+/* ============ v5 token 双色板 ============ */
+:root{--sans:"Noto Sans SC","Source Han Sans SC","Microsoft YaHei",sans-serif;
+ --mono:"IBM Plex Mono",Consolas,monospace;
+ --t-fast:160ms;--t-mid:240ms;--t-slow:400ms;--ease:cubic-bezier(.16,1,.3,1)}
+[data-theme="light"]{--bg:#e8e6e1;--panel:#efede7;--ink:#1a1a1a;
+ --g1:#565656;--g2:#94918a;--g3:#cfcdc7;
+ --hair:rgba(26,26,26,.12);--hair2:rgba(26,26,26,.26);
+ --accent:#8a2422;--accent-dim:rgba(138,36,34,.10);--err:#a33c34}
+[data-theme="dark"]{--bg:#131313;--panel:#1a1a19;--ink:#e9e7e2;
+ --g1:#a8a8a8;--g2:#6f6d68;--g3:#3a3a38;
+ --hair:rgba(233,231,226,.12);--hair2:rgba(233,231,226,.26);
+ --accent:#d3543f;--accent-dim:rgba(211,84,63,.14);--err:#c65b53}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.6 var(--sans);
+ transition:background var(--t-mid) var(--ease),color var(--t-mid) var(--ease)}
+.caps{font:9px var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--g2)}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;padding:0}
+
+/* ============ 无外框窗口壳（示意） ============ */
+.window{max-width:1280px;margin:26px auto;border:1px solid var(--hair2);
+ border-radius:10px;overflow:hidden;
+ box-shadow:0 18px 50px rgba(0,0,0,.16),0 2px 8px rgba(0,0,0,.10);
+ animation:winIn var(--t-slow) var(--ease)}
+@keyframes winIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+
+/* ---- 顶部功能条 = 原外框位置；整条即拖动区 ---- */
+.strip{display:flex;align-items:center;gap:14px;height:46px;padding:0 8px 0 16px;
+ background:var(--panel);border-bottom:1px solid var(--hair);position:relative}
+.strip .drag-hint{position:absolute;left:50%;top:3px;transform:translateX(-50%);
+ border:1px dashed var(--hair2);border-radius:4px;padding:0 8px;color:var(--g2);pointer-events:none}
+.mark{display:flex;align-items:center;gap:8px;font-weight:700;letter-spacing:.02em}
+.mark svg{stroke:var(--ink);fill:none;stroke-width:1.4;stroke-linecap:round}
+.face-tabs{display:flex;gap:2px;margin-left:6px}
+.face-tabs button{display:flex;align-items:center;gap:7px;padding:6px 14px;border-radius:6px;
+ color:var(--g1);transition:color var(--t-fast),background var(--t-fast)}
+.face-tabs button:hover{color:var(--ink)}
+.face-tabs button.on{color:var(--accent);background:var(--accent-dim)}
+.face-tabs svg{stroke:currentColor;fill:none;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
+.search{flex:1;max-width:420px;display:flex;align-items:center;gap:8px;height:30px;
+ padding:0 10px;border:1px solid var(--hair);border-radius:6px;color:var(--g2);
+ transition:border-color var(--t-fast)}
+.search:hover{border-color:var(--hair2)}
+.search svg{stroke:var(--g2);fill:none;stroke-width:1.4;stroke-linecap:round;flex:none}
+.search .modes{margin-left:auto;font:9px var(--mono);letter-spacing:.14em;color:var(--g2)}
+.spacer{flex:1}
+/* 功能组（原悬浮组，并入条内，同尺寸 32px） */
+.tools{display:flex;gap:4px}
+.tools button{width:32px;height:32px;display:grid;place-items:center;border-radius:6px;
+ color:var(--g1);position:relative;transition:color var(--t-fast),background var(--t-fast)}
+.tools button:hover{color:var(--ink);background:var(--accent-dim)}
+.tools svg{stroke:currentColor;fill:none;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
+.badge{position:absolute;top:3px;right:3px;width:13px;height:13px;border-radius:50%;
+ background:var(--accent);color:#fff;font:8px/13px var(--mono);text-align:center}
+/* 自绘窗口控制钮（最小化/最大化/关闭），关闭悬停=唯一红色落点 */
+.winctl{display:flex;margin-left:2px}
+.winctl button{width:40px;height:46px;display:grid;place-items:center;color:var(--g1);
+ transition:background var(--t-fast),color var(--t-fast)}
+.winctl button:hover{background:var(--hair);color:var(--ink)}
+.winctl button.close:hover{background:var(--err);color:#fff}
+.winctl svg{stroke:currentColor;fill:none;stroke-width:1.2}
+
+/* ============ 双面主体 ============ */
+.faces{position:relative;height:640px}
+.face{position:absolute;inset:0;display:none}
+.face.show{display:flex;animation:faceIn var(--t-mid) var(--ease)}
+@keyframes faceIn{from{opacity:0;transform:translateX(14px)}to{opacity:1;transform:none}}
+
+/* 通用栏 */
+.col-l{width:236px;flex:none;border-right:1px solid var(--hair);padding:20px 16px;overflow:auto}
+.col-r{width:288px;flex:none;border-left:1px solid var(--hair);padding:20px 16px;overflow:auto}
+.mid{flex:1;min-width:0;display:flex;flex-direction:column;padding:20px 26px;overflow:auto}
+
+/* StatHead：大数字滚动 */
+.stat-head{display:flex;gap:22px;margin-bottom:18px}
+.stat b{display:block;font:700 26px/1.1 var(--mono);letter-spacing:-.02em}
+.stat .caps{display:block;margin-top:3px}
+
+/* 立场树（缩进式） */
+.tree{margin-top:6px}
+.tree .t-caps{margin-bottom:8px}
+.node{display:flex;align-items:center;gap:6px;padding:3px 0;color:var(--g1);
+ transition:color var(--t-fast)}
+.node:hover{color:var(--ink)}
+.node .dot{width:5px;height:5px;border-radius:50%;background:var(--g2);flex:none}
+.node.lv1{color:var(--ink);font-weight:600;margin-top:8px}
+.node.lv2{padding-left:16px}
+.node.lv3{padding-left:32px;font-size:12px}
+.node .n{margin-left:auto;font:10px var(--mono);color:var(--g2)}
+
+/* 投影 tabs */
+.proj{display:flex;gap:2px;border-bottom:1px solid var(--hair);margin-bottom:16px}
+.proj button{padding:7px 14px;color:var(--g1);border-bottom:1px solid transparent;
+ transition:color var(--t-fast),border-color var(--t-fast)}
+.proj button:hover{color:var(--ink)}
+.proj button.on{color:var(--ink);border-bottom-color:var(--ink)}
+.pane{display:none}
+.pane.show{display:block;animation:faceIn var(--t-mid) var(--ease)}
+.fig-cap{margin-top:10px;color:var(--g2);font-size:11px}
+.fig-cap b{color:var(--g1);font-weight:600}
+
+/* 馆藏列表（stagger 入场） */
+.docrow{display:flex;gap:12px;align-items:baseline;padding:9px 0;border-bottom:1px solid var(--hair);
+ opacity:0;animation:rise var(--t-mid) var(--ease) forwards}
+.docrow:hover .title{color:var(--accent)}
+.docrow .title{font-weight:600;transition:color var(--t-fast)}
+.docrow .meta{margin-left:auto;font:10px var(--mono);color:var(--g2);flex:none}
+@keyframes rise{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+/* 图谱 SVG 邻域高亮：hover 时非邻域淡出到 g3 */
+.graphbox{border:1px solid var(--hair);border-radius:8px;background:var(--bg);overflow:hidden}
+.graphbox svg text{font:9px var(--mono);fill:var(--g1);letter-spacing:.06em}
+.g-net *{transition:opacity var(--t-mid) var(--ease),stroke var(--t-mid)}
+.g-net.focus .g-node{opacity:.22}.g-net.focus .g-link{opacity:.10}
+.g-net.focus .g-node.hi{opacity:1}.g-net.focus .g-link.hi{opacity:.9}
+
+/* 逻辑链双翼 / 条码时间轴 复用图注样式 */
+.chain,.tl{border:1px solid var(--hair);border-radius:8px;background:var(--bg)}
+.chain svg text,.tl svg text{font:9px var(--mono);fill:var(--g1);letter-spacing:.05em}
+
+/* 档案卡：卡片堆栈 */
+.cardstack{position:relative;margin-top:8px}
+.cardstack .card{border:1px solid var(--hair2);border-radius:8px;background:var(--panel);
+ padding:14px 16px;transition:transform var(--t-mid) var(--ease),box-shadow var(--t-mid)}
+.cardstack .card:nth-child(2){position:absolute;inset:0;transform:translate(6px,6px) scale(.985);opacity:.6;z-index:-1}
+.cardstack .card:nth-child(3){position:absolute;inset:0;transform:translate(12px,12px) scale(.97);opacity:.3;z-index:-2}
+.card h4{margin:0 0 2px;font-size:14px}
+.kv{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--hair);font-size:12px}
+.kv:last-child{border:none}
+.kv .k{color:var(--g2)}
+.card .hover-demo{margin-top:10px;color:var(--g1);transition:color var(--t-fast),transform var(--t-fast)}
+.card .hover-demo:hover{color:var(--accent);transform:translateX(2px)}
+
+/* ============ 回应面 ============ */
+.basket-item{padding:8px 0;border-bottom:1px solid var(--hair);font-size:12px;color:var(--g1)}
+.basket-item b{color:var(--ink);font-weight:600}
+.intent-row{display:flex;gap:6px;margin:12px 0}
+.intent-row button{padding:6px 16px;border:1px solid var(--hair);border-radius:6px;color:var(--g1);
+ transition:all var(--t-fast)}
+.intent-row button:hover{border-color:var(--hair2);color:var(--ink)}
+.intent-row button.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.inputbox{border:1px solid var(--hair);border-radius:8px;padding:12px 14px;color:var(--g2);
+ min-height:56px;background:var(--panel);transition:border-color var(--t-fast)}
+.inputbox:hover{border-color:var(--hair2)}
+.glance-lead{font:600 19px/1.55 var(--sans);margin:18px 0 10px;max-width:64ch}
+.glance-lead mark{background:none;color:var(--accent)}
+.bodyline{max-width:72ch;color:var(--g1);padding:4px 0}
+.cite{color:var(--accent);font:10px var(--mono);cursor:pointer}
+.marg{padding:9px 0;border-bottom:1px solid var(--hair);font-size:12px;color:var(--g1)}
+.marg b{display:block;color:var(--ink);font-size:12px}
+
+/* 加载呼吸点（唯一持续动效处） */
+.breath{display:inline-flex;gap:5px;align-items:center;color:var(--g2);font:10px var(--mono);letter-spacing:.14em}
+.breath i{width:5px;height:5px;border-radius:50%;background:var(--g1);animation:br 1.4s var(--ease) infinite}
+.breath i:nth-child(2){animation-delay:.2s}.breath i:nth-child(3){animation-delay:.4s}
+@keyframes br{0%,100%{opacity:.25;transform:scale(.8)}50%{opacity:1;transform:scale(1)}}
+
+/* toast：发丝线细条 */
+.toast{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);
+ border:1px solid var(--hair2);border-left:2px solid var(--accent);border-radius:6px;
+ background:var(--panel);padding:8px 16px;font-size:12px;color:var(--g1);
+ box-shadow:0 6px 20px rgba(0,0,0,.12);animation:rise var(--t-mid) var(--ease)}
+
+/* ============ 页面脚注 ============ */
+.notes{max-width:1280px;margin:18px auto 60px;padding:0 8px;color:var(--g2);font-size:12px}
+.notes h3{color:var(--ink);font-size:13px;margin:18px 0 6px}
+.notes table{border-collapse:collapse;width:100%;font-size:12px}
+.notes td,.notes th{border-bottom:1px solid var(--hair);padding:5px 10px;text-align:left;vertical-align:top}
+.notes th{color:var(--g2);font:9px var(--mono);letter-spacing:.14em;text-transform:uppercase;font-weight:400}
+.icon-cand{display:flex;gap:26px;margin-top:8px}
+.icon-cand figure{margin:0;text-align:center;color:var(--g2)}
+.icon-cand .ibox{width:64px;height:64px;border:1px solid var(--hair2);border-radius:14px;
+ display:grid;place-items:center;background:var(--panel);transition:transform var(--t-fast)}
+.icon-cand figure:hover .ibox{transform:translateY(-2px)}
+.icon-cand svg{stroke:var(--ink);fill:none;stroke-width:1.3;stroke-linecap:round;stroke-linejoin:round}
+.ctrls{display:flex;gap:10px;align-items:center;max-width:1280px;margin:22px auto 0;padding:0 8px}
+.ctrls button{border:1px solid var(--hair2);border-radius:6px;padding:6px 14px;color:var(--g1);
+ font:10px var(--mono);letter-spacing:.14em;text-transform:uppercase;
+ transition:color var(--t-fast),border-color var(--t-fast)}
+.ctrls button:hover{color:var(--ink);border-color:var(--ink)}
+</style>
+</head>
+<body>
+
+<div class="ctrls">
+  <button id="themeBtn">theme · light/dark</button>
+  <span class="caps">static mock · frameless target · not the app</span>
+</div>
+
+<div class="window">
+  <!-- ===== 顶部功能条：取代系统外框，整条 = 拖动区（data-tauri-drag-region） ===== -->
+  <div class="strip">
+    <span class="drag-hint caps">drag region · double-click = maximize</span>
+    <div class="mark">
+      <svg width="18" height="18" viewBox="0 0 18 18"><path d="M3 15V4.5c0-.8.7-1.5 1.5-1.5H9v12M9 15V3h4.5c.8 0 1.5.7 1.5 1.5V15M3 15h12M5.5 6H7M5.5 8.5H7M11.5 6H13M11.5 8.5H13"/></svg>
+      Debate Engine
+    </div>
+    <div class="face-tabs">
+      <button class="on" data-face="lib">
+        <svg width="14" height="14" viewBox="0 0 16 16"><path d="M2 3h12M2 3v10h12V3M6 3v10M2 7h12"/></svg>
+        知识库面</button>
+      <button data-face="resp">
+        <svg width="14" height="14" viewBox="0 0 16 16"><path d="M3 3h10v7H8l-3 3v-3H3zM6 6.5h4"/></svg>
+        回应面</button>
+    </div>
+    <div class="search">
+      <svg width="13" height="13" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg>
+      检索知识库…<span class="modes">段落 | 论点 | 脉络</span>
+    </div>
+    <div class="spacer"></div>
+    <div class="tools">
+      <button title="素材篮"><svg width="15" height="15" viewBox="0 0 16 16"><path d="M2.5 6h11l-1 7h-9zM5.5 6V4.5a2.5 2.5 0 015 0V6"/></svg><span class="badge">3</span></button>
+      <button title="切换面"><svg width="15" height="15" viewBox="0 0 16 16"><path d="M2 8h12M10 4l4 4-4 4"/></svg></button>
+      <button title="设置"><svg width="15" height="15" viewBox="0 0 16 16"><path d="M2 5h8M12 5h2M2 11h2M6 11h8"/><circle cx="11" cy="5" r="1.6"/><circle cx="5" cy="11" r="1.6"/></svg></button>
+    </div>
+    <div class="winctl">
+      <button title="最小化"><svg width="11" height="11" viewBox="0 0 12 12"><path d="M1 6h10"/></svg></button>
+      <button title="最大化"><svg width="11" height="11" viewBox="0 0 12 12"><rect x="1.5" y="1.5" width="9" height="9"/></svg></button>
+      <button class="close" title="关闭"><svg width="11" height="11" viewBox="0 0 12 12"><path d="M2 2l8 8M10 2l-8 8"/></svg></button>
+    </div>
+  </div>
+
+  <div class="faces">
+    <!-- ============ 知识库面 ============ -->
+    <div class="face show" id="face-lib">
+      <aside class="col-l">
+        <div class="stat-head">
+          <div class="stat"><b data-count="128">0</b><span class="caps">docs</span></div>
+          <div class="stat"><b data-count="962">0</b><span class="caps">arg-units</span></div>
+        </div>
+        <div class="tree">
+          <div class="t-caps caps">stance tree</div>
+          <div class="node lv1"><span class="dot"></span>古典自由主义<span class="n">42</span></div>
+          <div class="node lv2"><span class="dot"></span>《通往奴役之路》<span class="n">18</span></div>
+          <div class="node lv3"><span class="dot"></span>计划经济导致专制<span class="n">6</span></div>
+          <div class="node lv3"><span class="dot"></span>价格信号不可替代<span class="n">5</span></div>
+          <div class="node lv2"><span class="dot"></span>《自由宪章》<span class="n">14</span></div>
+          <div class="node lv1"><span class="dot"></span>马克思主义<span class="n">35</span></div>
+          <div class="node lv2"><span class="dot"></span>《资本论》第一卷<span class="n">21</span></div>
+          <div class="node lv1"><span class="dot"></span>凯恩斯主义<span class="n">19</span></div>
+          <div class="node lv1"><span class="dot"></span>新自由主义<span class="n">12</span></div>
+        </div>
+      </aside>
+
+      <section class="mid">
+        <div class="proj">
+          <button data-pane="collection">馆藏</button>
+          <button class="on" data-pane="graph">图谱</button>
+          <button data-pane="chain">逻辑链</button>
+          <button data-pane="timeline">脉络</button>
+          <button data-pane="compare">对比</button>
+        </div>
+
+        <!-- 馆藏（stagger 入场演示） -->
+        <div class="pane" id="pane-collection">
+          <div class="docrow" style="animation-delay:0ms"><span class="title">通往奴役之路</span><span class="caps">哈耶克 · 1944</span><span class="meta">18 units</span></div>
+          <div class="docrow" style="animation-delay:40ms"><span class="title">资本论（第一卷）</span><span class="caps">马克思 · 1867</span><span class="meta">21 units</span></div>
+          <div class="docrow" style="animation-delay:80ms"><span class="title">就业、利息和货币通论</span><span class="caps">凯恩斯 · 1936</span><span class="meta">15 units</span></div>
+          <div class="docrow" style="animation-delay:120ms"><span class="title">自由宪章</span><span class="caps">哈耶克 · 1960</span><span class="meta">14 units</span></div>
+          <div class="docrow" style="animation-delay:160ms"><span class="title">资本主义与自由</span><span class="caps">弗里德曼 · 1962</span><span class="meta">9 units</span></div>
+          <p class="fig-cap"><b>交互：</b>逐条淡入上浮 4px · 间隔 40ms · 悬停标题落强调色，无位移无放大</p>
+        </div>
+
+        <!-- 图谱（邻域高亮：悬停任一节点） -->
+        <div class="pane show" id="pane-graph">
+          <div class="graphbox">
+            <svg id="gnet" class="g-net" viewBox="0 0 760 380" width="100%" height="380">
+              <g class="g-link" data-n="a"><path d="M180,120 C260,80 320,90 380,130" stroke="var(--g3)" stroke-width="2.4" fill="none" opacity=".55"/></g>
+              <g class="g-link" data-n="a"><path d="M180,120 C220,190 280,220 350,235" stroke="var(--g3)" stroke-width="1" fill="none" opacity=".4"/></g>
+              <g class="g-link" data-n="b"><path d="M380,130 C440,150 500,160 560,150" stroke="var(--g3)" stroke-width="1.6" fill="none" opacity=".5"/></g>
+              <g class="g-link" data-n="c"><path d="M350,235 C430,250 500,235 560,150" stroke="var(--g3)" stroke-width="1" fill="none" opacity=".35"/></g>
+              <g class="g-link" data-n="d"><path d="M120,270 C200,270 280,255 350,235" stroke="var(--g3)" stroke-width="1.2" fill="none" opacity=".4"/></g>
+              <g class="g-node" data-n="a"><circle cx="180" cy="120" r="9" fill="var(--bg)" stroke="var(--ink)" stroke-width="1.5"/><text x="180" y="100" text-anchor="middle">市场经济有效</text></g>
+              <g class="g-node" data-n="b"><circle cx="380" cy="130" r="7" fill="var(--ink)"/><text x="380" y="112" text-anchor="middle">价格信号论</text></g>
+              <g class="g-node" data-n="c"><circle cx="350" cy="235" r="7" fill="var(--bg)" stroke="var(--ink)" stroke-width="1.5"/><text x="350" y="256" text-anchor="middle">计划不可行</text></g>
+              <g class="g-node" data-n="d"><circle cx="120" cy="270" r="6" fill="var(--ink)"/><text x="120" y="292" text-anchor="middle">自发秩序</text></g>
+              <g class="g-node" data-n="e"><circle cx="560" cy="150" r="7" fill="var(--bg)" stroke="var(--accent)" stroke-width="1.5"/><text x="560" y="132" text-anchor="middle">剥削剩余价值</text></g>
+              <g class="g-node" data-n="f"><circle cx="640" cy="260" r="6" fill="var(--ink)"/><text x="640" y="282" text-anchor="middle">国家干预必要</text></g>
+              <g class="g-link" data-n="e"><path d="M560,150 C600,190 620,220 640,260" stroke="var(--g3)" stroke-width="1" fill="none" opacity=".35"/></g>
+            </svg>
+          </div>
+          <p class="fig-cap"><b>交互：</b>悬停节点 = 邻域保持墨色、其余淡出（聚光灯落在纸面）· 边粗=攻击次数 · 点击=镜头 400ms 滑近聚焦 · 实心/空心=立场族编码，不用彩色</p>
+        </div>
+
+        <!-- 逻辑链：流程图式（方框=论点 · 箭头带标签=关系 · 自上而下=年代） -->
+        <div class="pane" id="pane-chain">
+          <div class="chain">
+            <svg viewBox="0 0 760 340" width="100%" height="340">
+              <text x="24" y="30" font-size="8.5" fill="var(--g2)" letter-spacing="2">TOP → BOTTOM = TIME</text>
+              <!-- 主线节点 1 -->
+              <rect x="295" y="20" width="170" height="44" rx="6" fill="var(--bg)" stroke="var(--ink)" stroke-width="1.2"/>
+              <text x="380" y="38" text-anchor="middle" font-size="10.5" fill="var(--ink)">计划经济不可行</text>
+              <text x="380" y="53" text-anchor="middle" font-size="8.5" fill="var(--g2)">米塞斯 · 1922 · 计算问题</text>
+              <!-- 箭头：演进 -->
+              <path d="M380,64 V110" stroke="var(--ink)" stroke-width="1.1" fill="none"/>
+              <path d="M376,104 L380,112 L384,104" stroke="var(--ink)" stroke-width="1.1" fill="none"/>
+              <text x="392" y="92" font-size="8.5" fill="var(--ink)">演进</text>
+              <!-- 主线节点 2 -->
+              <rect x="295" y="116" width="170" height="44" rx="6" fill="var(--bg)" stroke="var(--ink)" stroke-width="1.2"/>
+              <text x="380" y="134" text-anchor="middle" font-size="10.5" fill="var(--ink)">知识分散论</text>
+              <text x="380" y="149" text-anchor="middle" font-size="8.5" fill="var(--g2)">哈耶克 · 1944</text>
+              <!-- 攻击节点（右，虚线红箭） -->
+              <rect x="565" y="116" width="150" height="44" rx="6" fill="var(--bg)" stroke="var(--g2)" stroke-width="1"/>
+              <text x="640" y="134" text-anchor="middle" font-size="10.5" fill="var(--ink)">有效需求不足，需干预</text>
+              <text x="640" y="149" text-anchor="middle" font-size="8.5" fill="var(--g2)">凯恩斯 · 1936</text>
+              <path d="M565,138 H474" stroke="var(--accent)" stroke-width="1" stroke-dasharray="3 3" fill="none"/>
+              <path d="M482,134 L474,138 L482,142" stroke="var(--accent)" stroke-width="1" fill="none"/>
+              <text x="520" y="130" text-anchor="middle" font-size="8.5" fill="var(--accent)">攻击</text>
+              <!-- 箭头：细化 -->
+              <path d="M380,160 V206" stroke="var(--ink)" stroke-width="1.1" fill="none"/>
+              <path d="M376,200 L380,208 L384,200" stroke="var(--ink)" stroke-width="1.1" fill="none"/>
+              <text x="392" y="188" font-size="8.5" fill="var(--ink)">细化</text>
+              <!-- 主线节点 3 -->
+              <rect x="295" y="212" width="170" height="44" rx="6" fill="var(--bg)" stroke="var(--ink)" stroke-width="1.2"/>
+              <text x="380" y="230" text-anchor="middle" font-size="10.5" fill="var(--ink)">价格机制不可替代</text>
+              <text x="380" y="245" text-anchor="middle" font-size="8.5" fill="var(--g2)">弗里德曼 · 1962</text>
+              <!-- 支持节点（左，细实线箭） -->
+              <rect x="60" y="212" width="150" height="44" rx="6" fill="var(--bg)" stroke="var(--g2)" stroke-width="1"/>
+              <text x="135" y="230" text-anchor="middle" font-size="10.5" fill="var(--ink)">自发秩序</text>
+              <text x="135" y="245" text-anchor="middle" font-size="8.5" fill="var(--g2)">哈耶克 · 1960</text>
+              <path d="M210,234 H286" stroke="var(--g2)" stroke-width="1" fill="none"/>
+              <path d="M278,230 L286,234 L278,238" stroke="var(--g2)" stroke-width="1" fill="none"/>
+              <text x="248" y="226" text-anchor="middle" font-size="8.5" fill="var(--g1)">支持</text>
+              <!-- 图例 -->
+              <g transform="translate(60,300)">
+                <path d="M0,0 H34" stroke="var(--ink)" stroke-width="1.1"/><path d="M30,-4 L34,0 L30,4" stroke="var(--ink)" stroke-width="1.1" fill="none"/>
+                <text x="42" y="3" font-size="8.5" fill="var(--g1)">演进 / 细化（主线）</text>
+                <path d="M150,0 H184" stroke="var(--g2)" stroke-width="1"/><path d="M180,-4 L184,0 L180,4" stroke="var(--g2)" stroke-width="1" fill="none"/>
+                <text x="192" y="3" font-size="8.5" fill="var(--g1)">支持（侧翼）</text>
+                <path d="M280,0 H314" stroke="var(--accent)" stroke-width="1" stroke-dasharray="3 3"/><path d="M310,-4 L314,0 L310,4" stroke="var(--accent)" stroke-width="1" fill="none"/>
+                <text x="322" y="3" font-size="8.5" fill="var(--g1)">攻击（交锋）</text>
+              </g>
+            </svg>
+          </div>
+          <p class="fig-cap"><b>交互：</b>读法零门槛——方框=论点、箭头文字=关系、上下=年代 · 悬停方框=该论点的档案卡淡入 · 点「攻击」箭头=跳转对方论点 · 链可导出进综合报告</p>
+        </div>
+
+        <!-- 脉络条码 -->
+        <div class="pane" id="pane-timeline">
+          <div class="tl">
+            <svg viewBox="0 0 760 240" width="100%" height="240">
+              <g stroke="var(--hair)" stroke-width="1">
+                <line x1="80" y1="30" x2="80" y2="200"/><line x1="230" y1="30" x2="230" y2="200"/><line x1="380" y1="30" x2="380" y2="200"/><line x1="530" y1="30" x2="530" y2="200"/><line x1="680" y1="30" x2="680" y2="200"/>
+              </g>
+              <g font-size="8.5" fill="var(--g2)"><text x="80" y="218" text-anchor="middle">1860</text><text x="230" y="218" text-anchor="middle">1900</text><text x="380" y="218" text-anchor="middle">1940</text><text x="530" y="218" text-anchor="middle">1980</text><text x="680" y="218" text-anchor="middle">2020</text></g>
+              <g stroke="var(--ink)" stroke-width="1.1">
+                <line x1="105" y1="70" x2="105" y2="110" opacity=".8"/><line x1="300" y1="60" x2="300" y2="130" opacity=".9"/><line x1="392" y1="75" x2="392" y2="118" opacity=".7"/><line x1="470" y1="55" x2="470" y2="140"/><line x1="560" y1="80" x2="560" y2="115" opacity=".5"/>
+              </g>
+              <g fill="var(--accent)"><circle cx="392" cy="70" r="2.4"/></g>
+              <text x="398" y="66" font-size="8.5" fill="var(--accent)">1944 通往奴役之路</text>
+            </svg>
+          </div>
+          <p class="fig-cap"><b>交互：</b>棒棒糖高度=被引次数 · 唯一红点=当前焦点 · 悬停显示书名年份（不弹窗，原位标注）</p>
+        </div>
+
+        <div class="pane" id="pane-compare"><p class="fig-cap">对比投影沿用 v5 稿（文档矩阵 / 文本对读 / 分歧点），本稿不重复。</p></div>
+      </section>
+
+      <aside class="col-r">
+        <div class="caps">dossier · 论点档案卡</div>
+        <div class="cardstack">
+          <div class="card">
+            <h4>计划经济导致专制</h4>
+            <span class="caps">arg-unit · hayek 1944</span>
+            <div style="margin-top:10px">
+              <div class="kv"><span class="k">立场</span><span>古典自由主义</span></div>
+              <div class="kv"><span class="k">证据</span><span>第 7 章引文 ×3</span></div>
+              <div class="kv"><span class="k">关系</span><span>攻击 ×4 · 支持 ×2</span></div>
+              <div class="kv"><span class="k">译者</span><span>王明毅</span></div>
+              <div class="kv"><span class="k">出版社</span><span>商务印书馆</span></div>
+            </div>
+            <div class="hover-demo">→ 加入素材篮</div>
+            <div class="hover-demo">→ 以此为锚看逻辑链</div>
+          </div>
+          <div class="card"></div><div class="card"></div>
+        </div>
+        <p class="fig-cap" style="margin-top:22px"><b>交互：</b>卡片堆栈表达"库里还有相邻档案" · 动作=墨色加深+右移 2px，不弹跳</p>
+      </aside>
+    </div>
+
+    <!-- ============ 回应面 ============ -->
+    <div class="face" id="face-resp">
+      <aside class="col-l">
+        <div class="caps">material basket · 3/20</div>
+        <div class="basket-item"><b>价格信号不可替代</b><br>哈耶克 · 通往奴役之路</div>
+        <div class="basket-item"><b>计算问题</b><br>米塞斯 · 1922</div>
+        <div class="basket-item"><b>自发秩序</b><br>哈耶克 · 自由宪章</div>
+        <div class="caps" style="margin-top:20px">history</div>
+        <div class="basket-item">反驳「计划经济更高效」<span class="caps" style="display:block;margin-top:2px">deepseek · 昨天 ★</span></div>
+        <div class="basket-item">评价「市场万能论」<span class="caps" style="display:block;margin-top:2px">deepseek · 3天前</span></div>
+      </aside>
+      <section class="mid">
+        <div class="caps">input · 把言论扔进来</div>
+        <div class="inputbox" style="margin-top:8px">"计划经济能够集中力量办大事，比市场经济更高效……"</div>
+        <div class="intent-row">
+          <button class="on">反驳</button><button>批判</button><button>评价</button><button>分析</button><button>综合报告</button>
+        </div>
+        <div style="display:flex;gap:12px;align-items:center">
+          <button style="background:var(--ink);color:var(--bg);padding:8px 22px;border-radius:6px;font-weight:600">生成回应</button>
+          <span class="breath"><i></i><i></i><i></i> retrieving kb</span>
+        </div>
+        <div class="glance-lead">这个论断混淆了<mark>动员效率</mark>与<mark>配置效率</mark>——集中力量办成某件事，不等于把资源用在了最该用的地方。</div>
+        <div class="bodyline">哈耶克在《通往奴役之路》中指出，中央计划者无法获取分散在千万人手中的局部知识 <span class="cite">[C1]</span>；米塞斯更早提出计算问题：没有价格信号，计划机关无从比较成本 <span class="cite">[C2]</span>。</div>
+        <p class="fig-cap"><b>交互：</b>生成中=呼吸点（全软件唯一持续动效）· 完成后首段大字（Glance 要点先行）· 引用角标悬停=页边注对应条目同步高亮</p>
+      </section>
+      <aside class="col-r">
+        <div class="caps">marginalia · 引用与谬误</div>
+        <div class="marg"><b>[C1] 通往奴役之路 · 第 7 章</b>"知识分散在任何个人手中……" <span class="caps">p.114 · 商务印书馆</span></div>
+        <div class="marg"><b>[C2] 米塞斯 · 1922</b>经济计算在社会主义社会不可行</div>
+        <div class="marg"><b>⚠ 对方谬误 · 假因果</b>"集中力量办成事"推不出"整体更高效"</div>
+      </aside>
+    </div>
+
+    <div class="toast">已加入素材篮 · 3/20 <span style="color:var(--g2)">（发丝线细条 · 2.5s 自动消失 · 不弹跳）</span></div>
+  </div>
+</div>
+
+<!-- ============ 设计说明 ============ -->
+<div class="notes">
+  <h3>无外框结构决策</h3>
+  <table>
+    <tr><th>项</th><th>决定</th></tr>
+    <tr><td>系统外框</td><td>关闭（decorations:false），顶部功能条取代原外框位置，整条为拖动区，双击=最大化/还原</td></tr>
+    <tr><td>窗口控制钮</td><td>自绘 最小化/最大化/关闭，置于功能条最右；关闭钮悬停=全软件唯一红色落点</td></tr>
+    <tr><td>原悬浮组</td><td>并入功能条（素材篮/切面/设置，同尺寸 32px 自绘线型图标），不再悬浮遮挡档案卡</td></tr>
+    <tr><td>窗口阴影</td><td>保留系统投影（shadow:true），无"纸片感"</td></tr>
+    <tr><td>代价</td><td>Windows 贴边分屏（Aero Snap）失效——接受，或记债后补手写贴边</td></tr>
+    <tr><td>红利</td><td>标题栏完全归软件所有，深浅主题切换时白标题栏问题从根上消失</td></tr>
+  </table>
+  <h3>呼吸感交互规格（全软件统一）</h3>
+  <table>
+    <tr><th>场景</th><th>规格</th></tr>
+    <tr><td>时长/缓动</td><td>快 160ms（悬停反馈）· 中 240ms（面板/弹层/切面按钮）· 慢 400ms（图谱镜头）· 一律减速进场 ease-out</td></tr>
+    <tr><td>静止</td><td>零动画；唯一持续动效=加载呼吸点；尊重系统"减少动态效果"</td></tr>
+    <tr><td>悬停</td><td>只调墨色阶，不放大不位移；图谱=邻域高亮其余淡出</td></tr>
+    <tr><td>入场</td><td>列表 stagger 淡入+上浮 4px、间隔 40ms；弹层淡入+上浮 2px；出场只淡出</td></tr>
+    <tr><td>危险操作</td><td>无动画直出确认条，不给迟疑感</td></tr>
+  </table>
+  <h3>桌面图标（定稿）：平叠四本书 · 页边/书脊交替 · 宽窄错落不旋转 · 线型单色化 · 四尺寸验证</h3>
+  <div class="icon-cand">
+    <figure><div class="ibox"><svg width="40" height="40" viewBox="0 0 34 34"><g><rect x="5" y="26" width="23" height="6" rx="1" fill="var(--panel)"/><path d="M24,27.5 V30.5 M26,27.5 V30.5"/></g><g><path d="M27,18 H10 C8,18 7,19.5 7,21.5 C7,23.5 8,25 10,25 H27" fill="var(--panel)"/><path d="M26,19.2 V23.8 M11,20.3 H24.5 M11,22.7 H24.5"/><path d="M21.5,25 v3.2 l1.5,-1.3 l1.5,1.3 v-3.2 z" fill="var(--accent)" stroke="var(--accent)" stroke-width=".8"/></g><g><rect x="6" y="11" width="22" height="6" rx="1" fill="var(--panel)"/><path d="M9,12.5 V15.5 M11,12.5 V15.5"/></g><g><path d="M27,4 H11 C9,4 8,5.5 8,7 C8,8.5 9,10 11,10 H27" fill="var(--panel)"/><path d="M26,5.2 V8.8 M12,6.2 H24.5 M12,7.8 H24.5"/></g></svg></div><figcaption>64px 容器</figcaption></figure>
+    <figure><div class="ibox" style="width:48px;height:48px"><svg width="30" height="30" viewBox="0 0 34 34"><g><rect x="5" y="26" width="23" height="6" rx="1" fill="var(--panel)"/><path d="M24,27.5 V30.5 M26,27.5 V30.5"/></g><g><path d="M27,18 H10 C8,18 7,19.5 7,21.5 C7,23.5 8,25 10,25 H27" fill="var(--panel)"/><path d="M26,19.2 V23.8 M11,20.3 H24.5 M11,22.7 H24.5"/><path d="M21.5,25 v3.2 l1.5,-1.3 l1.5,1.3 v-3.2 z" fill="var(--accent)" stroke="var(--accent)" stroke-width=".8"/></g><g><rect x="6" y="11" width="22" height="6" rx="1" fill="var(--panel)"/><path d="M9,12.5 V15.5 M11,12.5 V15.5"/></g><g><path d="M27,4 H11 C9,4 8,5.5 8,7 C8,8.5 9,10 11,10 H27" fill="var(--panel)"/><path d="M26,5.2 V8.8 M12,6.2 H24.5 M12,7.8 H24.5"/></g></svg></div><figcaption>48px</figcaption></figure>
+    <figure><div class="ibox" style="width:36px;height:36px;border-radius:9px"><svg width="22" height="22" viewBox="0 0 34 34"><g><rect x="5" y="26" width="23" height="6" rx="1" fill="var(--panel)"/><path d="M24,27.5 V30.5 M26,27.5 V30.5"/></g><g><path d="M27,18 H10 C8,18 7,19.5 7,21.5 C7,23.5 8,25 10,25 H27" fill="var(--panel)"/><path d="M26,19.2 V23.8 M11,20.3 H24.5 M11,22.7 H24.5"/><path d="M21.5,25 v3.2 l1.5,-1.3 l1.5,1.3 v-3.2 z" fill="var(--accent)" stroke="var(--accent)" stroke-width=".8"/></g><g><rect x="6" y="11" width="22" height="6" rx="1" fill="var(--panel)"/><path d="M9,12.5 V15.5 M11,12.5 V15.5"/></g><g><path d="M27,4 H11 C9,4 8,5.5 8,7 C8,8.5 9,10 11,10 H27" fill="var(--panel)"/><path d="M26,5.2 V8.8 M12,6.2 H24.5 M12,7.8 H24.5"/></g></svg></div><figcaption>32px</figcaption></figure>
+    <figure><div class="ibox" style="width:26px;height:26px;border-radius:6px"><svg width="16" height="16" viewBox="0 0 34 34"><g><rect x="5" y="26" width="23" height="6" rx="1" fill="var(--panel)"/></g><g><path d="M27,18 H10 C8,18 7,19.5 7,21.5 C7,23.5 8,25 10,25 H27" fill="var(--panel)"/></g><g><rect x="6" y="11" width="22" height="6" rx="1" fill="var(--panel)"/></g><g><path d="M27,4 H11 C9,4 8,5.5 8,7 C8,8.5 9,10 11,10 H27" fill="var(--panel)"/></g></svg></div><figcaption>16px（任务栏，只留四层轮廓）</figcaption></figure>
+  </div>
+</div>
+
+<script>
+// 主题
+document.getElementById('themeBtn').onclick=()=>{
+  const h=document.documentElement;
+  h.dataset.theme=h.dataset.theme==='light'?'dark':'light';
+};
+// 切面
+document.querySelectorAll('.face-tabs button').forEach(b=>{
+  b.onclick=()=>{
+    document.querySelectorAll('.face-tabs button').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');
+    document.querySelectorAll('.face').forEach(f=>f.classList.remove('show'));
+    document.getElementById('face-'+b.dataset.face).classList.add('show');
+  };
+});
+// 投影 tabs
+document.querySelectorAll('.proj button').forEach(b=>{
+  b.onclick=()=>{
+    document.querySelectorAll('.proj button').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');
+    document.querySelectorAll('.pane').forEach(p=>p.classList.remove('show'));
+    document.getElementById('pane-'+b.dataset.pane).classList.add('show');
+  };
+});
+// 图谱邻域高亮
+const net=document.getElementById('gnet');
+net.querySelectorAll('.g-node').forEach(n=>{
+  const id=n.dataset.n;
+  n.addEventListener('mouseenter',()=>{
+    net.classList.add('focus');
+    n.classList.add('hi');
+    net.querySelectorAll(`.g-link[data-n="${id}"]`).forEach(l=>l.classList.add('hi'));
+    net.querySelectorAll(`.g-link[data-n="${id}"] ~ .g-node, .g-node`).forEach(()=>{});
+    // 邻接节点（按 link 的端点近似：本示意把同 data-n 视作邻域）
+  });
+  n.addEventListener('mouseleave',()=>{
+    net.classList.remove('focus');
+    net.querySelectorAll('.hi').forEach(x=>x.classList.remove('hi'));
+  });
+});
+// StatHead 数字滚动
+const ease=t=>1-Math.pow(1-t,4);
+document.querySelectorAll('[data-count]').forEach(el=>{
+  const target=+el.dataset.count,t0=performance.now();
+  const step=now=>{
+    const p=Math.min((now-t0)/700,1);
+    el.textContent=Math.round(target*ease(p));
+    if(p<1)requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+});
+</script>
+</body>
+</html>

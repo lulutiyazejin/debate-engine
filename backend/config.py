@@ -14,7 +14,7 @@ except ImportError:
     pass
 
 # ---------- 版本（全局唯一来源，main/diagnostics/cli 均引用此处） ----------
-VERSION = "0.1.2"
+VERSION = "0.1.3"
 
 # ---------- 存储后端（服务器级抽象层：当前仅 sqlite，未来可插 postgres） ----------
 STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "sqlite")
@@ -169,6 +169,46 @@ def effective_provider_models() -> dict[str, str]:
             if name in models and isinstance(model, str) and model.strip():
                 models[name] = model.strip()
     return models
+
+
+# ---------- 代理三态（0.1.3 B6：不开/系统/自定义，本地地址永远直连） ----------
+_LOCAL_HOSTS = ("127.0.0.1", "localhost", "0.0.0.0")
+
+
+def proxy_config() -> dict:
+    """settings.json 的 proxy 键：{"mode": "off|system|custom", "url": "..."}。"""
+    s = load_settings()
+    p = s.get("proxy") if isinstance(s.get("proxy"), dict) else {}
+    mode = p.get("mode") if p.get("mode") in ("off", "system", "custom") else "off"
+    return {"mode": mode, "url": str(p.get("url") or "")}
+
+
+def httpx_proxy_for(url: str) -> str | None:
+    """按代理三态给 httpx 的 proxy 参数；127.0.0.1/localhost 一律 bypass
+    （否则自定义代理会切断本地 ollama）。system 模式交还环境变量（返回 None
+    且不清 trust_env）；off 模式由调用方置 trust_env=False。"""
+    try:
+        host = url.split("://", 1)[-1].split("/", 1)[0].split(":")[0]
+    except Exception:
+        host = ""
+    if host in _LOCAL_HOSTS:
+        return None
+    cfg = proxy_config()
+    if cfg["mode"] == "custom" and cfg["url"]:
+        return cfg["url"]
+    return None
+
+
+def httpx_trust_env_for(url: str) -> bool:
+    """off=不信环境变量（彻底直连）；system=信；custom=不信（只走自填）。
+    本地地址永远 False，避免系统代理劫持 ollama。"""
+    try:
+        host = url.split("://", 1)[-1].split("/", 1)[0].split(":")[0]
+    except Exception:
+        host = ""
+    if host in _LOCAL_HOSTS:
+        return False
+    return proxy_config()["mode"] == "system"
 
 
 apply_settings()

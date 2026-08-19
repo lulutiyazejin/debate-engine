@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Debate Engine · v5 功能原生图</title>
+<style>
+:root{--sans:"Noto Sans SC","Source Han Sans SC","Segoe UI",sans-serif;--mono:"IBM Plex Mono",Consolas,monospace}
+[data-theme="light"]{--bg:#e8e6e1;--ink:#161616;--g1:#565656;--g2:#9b9b9b;--g3:#cfcdc7}
+[data-theme="dark"]{--bg:#131313;--ink:#e9e7e2;--g1:#a8a8a8;--g2:#666;--g3:#333}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.6 var(--sans)}
+button{font:10px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--g2);background:none;border:none;cursor:pointer}
+button:hover{color:var(--ink)}
+.caps{font:9px var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--g2)}
+.page{max-width:1200px;margin:0 auto;padding:48px 56px 100px}
+.mast{display:flex;align-items:baseline;gap:18px;margin-bottom:30px}
+.mast h1{font:700 16px var(--sans);margin:0}
+.mast button{margin-left:auto}
+.manifesto{max-width:72ch;color:var(--g1);font-size:12.5px;line-height:1.8;margin:0 0 76px;padding-left:14px;border-left:1px solid var(--g2)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:80px}
+@media(max-width:960px){.grid2{display:block}.grid2 .ex{margin-bottom:96px}}
+.ex{margin-bottom:96px}
+.ex h2{font:700 18px/1.3 var(--sans);margin:0 0 3px}
+.ex .how{font:12px/1.55 var(--sans);color:var(--g2);margin:0 0 28px;max-width:74ch}
+.ex svg{display:block;margin:0 auto;width:100%;height:auto;overflow:visible}
+.ex .foot{margin-top:24px}
+text{font-family:var(--mono)}
+/* 图谱 */
+.nx{fill:var(--ink)} .nx-lbl{fill:var(--g1);font-size:10px} .edge{stroke-dasharray="2 3"}
+/* 立场立方体 */
+.vol{stroke-linejoin:round;stroke-opacity:.3;fill-opacity:.2} .ver{stroke-dasharray="1 3"} .axis{text-anchor:middle;font-size:9px;fill:var(--g2)}
+/* 逻辑链 */
+.ln{stroke-width:1.8;stroke-linecap:round} .ln-atk{stroke-dasharray="3 4";stroke-width:1.3} .card{rx="9"}
+/* 条码 */
+.barline{stroke-width:.5} .lollipop{stroke-width=".9"}
+/* 档案堆栈 */
+.cardstack{rx="8";filter:drop-shadow(0 6px 18px rgba(0,0,0,.15));stroke-width="1"}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="mast">
+    <h1>Debate Engine · 功能原生图</h1>
+    <span class="caps">v5 · one form per function · designed from the function itself</span>
+    <button id="themeBtn">theme</button>
+  </div>
+  <p class="manifesto">不再"套模板图"——每个图型的结构、编码、交互都直接对应功能需求。图谱=交互探索（节点+邻域），立场=三维坐标（立方体投影），逻辑链=双向分支（支持左/攻击右），脉络=时间累积（条码），档案=层级堆栈（层次阴影）。
+  这是“功能即形态”的设计，不是“形态套功能”。</p>
+
+  <!-- 1. 图谱 -->
+  <div class="ex">
+    <h2>图谱 · 网络交互</h2>
+    <p class="how">nodes = 论证单元 · color = stance family · edges = support/attack/refine · 悬停显示邻域边 · 点击弹出论点档案（本图为静态示意）</p>
+    <svg id="g-graph" viewBox="0 0 960 520"></svg>
+    <div class="foot caps">argument graph · interactive exploration · multi-view force layout</div>
+  </div>
+
+  <div class="grid2">
+    <!-- 2. 立场立方体 -->
+    <div class="ex">
+      <h2>立场立方体（MLM 投影）</h2>
+      <p class="how">每个点 = 一个文档 · x/y/z = 三轴坐标 · 大小 = 内容显著度 · 拖拽旋转（本图为静态透视图）</p>
+      <svg id="g-cube" viewBox="0 0 460 460"></svg>
+      <div class="foot caps">ideology cube · 3d projection · marxist dimensions</div>
+    </div>
+    <!-- 3. 逻辑链 -->
+    <div class="ex">
+      <h2>逻辑链 · 双翼分支</h2>
+      <p class="how">左侧 = 攻击翼 · 右侧 = 支持翼 · 主线 = 年代横向推进 · 空心卡 = 反向转折 · 箭头 = 引用方向</p>
+      <svg id="g-chain" viewBox="0 0 960 420"></svg>
+      <div class="foot caps">logic chain · two-wing branch · horizontal timeline</div>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <!-- 4. 脉络 -->
+    <div class="ex">
+      <h2>脉络 · 条码</h2>
+      <p class="how">每根发丝线 = 一年 · 棒头 = 论证峰值 · 读场不读数字</p>
+      <svg id="g-timeline" viewBox="0 0 960 360"></svg>
+      <div class="foot caps">history timeline · barcode lollipop · annual accumulation</div>
+    </div>
+    <!-- 5. 档案堆栈 -->
+    <div class="ex">
+      <h2>档案卡 · 层级堆栈</h2>
+      <p class="how">每一张 = 一篇论证单元档案 · 层级阴影 = 证据强度 · 标签 = 谬误标记（本图为静态示意图）</p>
+      <svg id="g-stack" viewBox="0 0 460 420"></svg>
+      <div class="foot caps">dossier stack · layered evidence · argument summary cards</div>
+    </div>
+  </div>
+</div>
+
+<script>
+function rng(seed){return()=>{seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const $=id=>document.getElementById(id);
+const C=()=>{const s=getComputedStyle(document.documentElement);return{ink:s.getPropertyValue('--ink').trim(),g1:s.getPropertyValue('--g1').trim(),g2:s.getPropertyValue('--g2').trim(),g3:s.getPropertyValue('--g3').trim()}};
+
+// 1 图谱
+function g1(){const c=C(),r=rng(11);let s='';
+ const stance=['#7d9ec7','#c79e7d','#8fb08a','#b08aa8','#55607a'];
+ let n=''; for(let i=0;i<18;i++){const cx=120+i*30,rn=5+r()*3,x=n?'M'+Math.abs(rn):`M${120+(i%4)*120},${(i%3+1)*160}`;
+   n+=`<circle cx="${(160+i*42).toFixed(0)}" cy="${((60+Math.random()*340)).toFixed(0)}" r="${rn.toFixed(1)}" fill="${stance[i%5]}"/><text x="${(160+i*42).toFixed(0)}" y="${((62+Math.random()*340)+14).toFixed(0)}" font-size="9" fill="${c.g1}" text-anchor="middle">${'A'+i}</text>`}
+ // edge
+ let e='';for(let i=0;i<12;i++){const s=(60+Math.random()*320),e=(60+Math.random()*320),to=280+s*0.6,rnd=s+(Math.random()-0.5)*80;
+   e+=`<line x1="${(s).toFixed(0)}" y1="${(e).toFixed(0)}" x2="${(rnd).toFixed(0)}" y2="${(e).toFixed(0)}" stroke="${c.g3}" stroke-width="1.2" opacity=".8"/>`}
+ const nodes=n.split('\n').map(l=>l.trim()).filter(Boolean).join('\n');
+ $('g-graph').innerHTML=`<g transform="translate(80,20)">${nodes}</g>${e}<rect x="40" y="40" width="880" height="460" fill="none" stroke="${c.g3}" stroke-width="1"/>`;$('g-graph').innerHTML+=' '; // 占位
+ g1();}
+
+// 2 立场立方体
+function g2(){const c=C(),r=rng(23);let s='';
+ // front face
+ const xf=[[0,0],[1,0],[1,1],[0,1]],xfS=[[0,0],[1,-1],[-1,-1],[1,-2]];
+ const z=[-1,-.3,.3,1];
+ xf.forEach(([x,y],i)=>{const cx=230+x*120,cy=230+y*120;s+=`<polygon points="230,230 ${230+120},230 ${230+120},350 ${230},350" fill="${c.g3}" opacity=".1"/><text x="230" y="222" font-size="8" fill="${c.g1}" text-anchor="end">ownership low</text><text x="370" y="222" font-size="8" fill="${c.g1}" text-anchor="start">ownership high</text>`});
+ // point
+ for(let i=0;i<24;i++){const x=40+Math.random()*80,y=60+Math.random()*60,z=60+Math.random()*60;
+  s+=`<circle cx="${(230+(x-.5)*120)).toFixed(0)}" cy="${(230-(y-.5)*60).toFixed(0)}" r="${3+Math.random()*3}" fill="${stance[i%5]}" opacity=".9"/>`}
+ const stances=['自由主义','马克思主义','保守主义'];
+ s+=`<text x="230" y="420" text-anchor="middle" font-size="9" fill="${c.g2}">z axis: ownership ↔ authority</text>`;
+ $('g-cube').innerHTML=s}
+
+// 3 逻辑链
+function g3(){const c=C(),r=rng(37);let s='';
+ const yrs=[1920,1944,1962,1980,2008,2020];
+ yrs.forEach((y,i)=>{const x=100+i*130;yPos=210;
+  s+=`<text x="${x}" y="${yPos+140}" font-size="9" fill="${c.g1}" text-anchor="middle">${y}</text>`;
+  if(i%3===0)s+=`<rect x="${x-45}" y="${yPos-60}" width="90" height="54" class="card" fill="${c.g3}" opacity=".1" stroke="${c.g3}" stroke-width="1.2"/>`;
+  if(i%3!==0 && i>0)s+=`<path d="M${x-40},${yPos-30} L${x-80},${yPos-30} L${x-80},${yPos+10} L${x-40},${yPos+10}" fill="none" stroke="${c.g3}" stroke-width="1" stroke-dasharray="2 3"/>`});
+ s+=`<path d="M100,210 Q 160,180 230,210 T 360,210 T 490,210 T 620,210" fill="none" stroke="${c.ink}" stroke-width="2.2" class="ln"/>`;
+ s+=`<path d="M230,210 L 190,170" stroke="${c.g1}" stroke-width="1.5" class="ln-atk"/>`;
+ s+=`<path d="M360,210 L 400,160" stroke="${c.g1}" stroke-width="1.5" class="ln-atk"/>`;
+ s+=`<circle cx="230" cy="210" r="4" fill="${c.paper}" stroke="${c.ink}" stroke-width="1.4"/><circle cx="360" cy="210" r="4" fill="${c.paper}" stroke="${c.ink}" stroke-width="1.4"/>`;
+ $('g-chain').innerHTML=s}
+
+// 4 条码
+function g4(){const c=C(),r=rng(51);let s='';
+ for(let i=0;i<96;i++){const x=40+i*9.2;s+=`<line x1="${x}" y1="24" x2="${x}" y2="300" stroke="${c.g3}" stroke-width=".5" class="barline"/>`}
+ for(let i=0;i<34;i++){const x=60+i*26+r()*8;const y=110+Math.sin(i*.5)*62+r()*46;tops.push([x,y,r()])}tops.forEach(([x,y,q],i)=>{s+=`<line x1="${x}" y1="${y}" x2="${x}" y2="${y+22+q*34}" stroke="${c.g1}" stroke-width=".9" class="lollipop"/>`;
+ s+=q>.72?`<circle cx="${x}" cy="${y}" r="3.6" fill="none" stroke="${c.ink}" stroke-width="1.1"/>`:`<circle cx="${x}" cy="${y}" r="${2.4+q*3.6}" fill="${c.ink}"/>`})
+ ['1930','1960','1990','2020'].forEach((t,i)=>s+=`<text x="${120+i*240}" y="362" font-size="8" letter-spacing="2" fill="${c.g2}">${t}</text>`);
+ $('g-timeline').innerHTML=s}
+
+// 5 档案堆栈
+function g5(){const c=C(),r=rng(73);let s='';
+ for(let i=0;i<6;i++){const x=60+i*12;const y=40-i*20;s+=`<rect x="${x}" y="${y}" width="340" height="64" rx="8" class="cardstack" fill="${c.g3}" opacity="0.1"+i+" />`;
+  s+=`<text x="${x+16}" y="${y+24}" font-size="10" font-weight="700" fill="${c.ink}">${['计划经济批判','价格信号机制','竞争协调方式','极权风险论','剩余价值说','福利国家局限'][i]}</text>`;
+  s+=`<text x="${x+16}" y="${y+44}" font-size="8" fill="${c.g1}">哈耶克 · 1944 / 马克思 · 1867</text>`}
+ $('g-stack').innerHTML=s}
+
+function draw(){g1();g2();g3();g4();g5()}draw();
+$('themeBtn').onclick=()=>{const r=document.documentElement;r.dataset.theme=r.dataset.theme==='light'?'dark':'light';draw()};
+</script>
+</body>
+</html>

@@ -268,3 +268,20 @@ knowledge_base/                # 知识库数据目录（运行时，用户管�
 | `knowledge_base/skills/stances/marxist.skill.md` | ~200 | 300 | OK，暂无需处理 | — |
 
 **紧急程度排序（V1.0 基线）**：RebuttalPanel.tsx（主流程枢纽，最先触预警）＞ rebuttal_engine.py（核心逻辑膨胀风险高）＞ IdeologyCube.tsx（3D 渲染天然复杂）＞ summarizer.py（三策略分支容易混写）
+
+---
+
+## 6. 0.1.3 架构变更（详见 PLAN-0.1.3.md）
+
+| 子系统 | 变更 | 边界说明 |
+|---|---|---|
+| 窗口层 | 无外框（decorations:false）+ 功能条拖动区 + 自绘控制钮 | Tauri 配置 + capabilities 补权；贴边分屏失效接受 |
+| 存储层 | documents +6 元数据列；ALTER 迁移 + upsert 列清单三处同改 | sqlite_store 单点；分享包同步受益 |
+| 联网补充层 | 新增 `web_enrich.py`（wiki 中→英→百科→bing，每级 3s，手动标优先） | 独立模块，失败不阻塞入库；走代理层 |
+| 代理层 | settings.json proxy 三态；httpx 统一注入；127.0.0.1 bypass | 模型/维基/百科全部外发请求经此 |
+| 模型层 | ollama 适配器（探测/拉起/pull/下载立即生效）+ 任务映射表 | 复用 effective_task_chains/provider_models 热生效 |
+| 立场体系 | skills/stances 目录扫描自动发现；17 预置 + 手动导入端点 | skill_loader 热加载；前端零硬编码 |
+| 字体递送 | 引擎 StaticFiles 递 fonts\；前端 FontFace 动态注册 | 不进安装包；报告 HTML 不受影响 |
+| 视觉层 | tokens v5 + G6 换皮 + 交互词汇常量 | 硬编码色值白名单制；样张 design-preview-frameless.html |
+
+行数管理影响：`web_enrich.py` 与 ollama 适配器新文件各 ≤250 行；`sqlite_store.py` 元数据扩展后若越线，拆 `migrations.py`（批 E 复审）。
