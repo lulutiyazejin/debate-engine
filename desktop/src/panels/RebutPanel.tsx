@@ -51,6 +51,9 @@ export default function RebutPanel({ stances, prefill, setSide, setRightOpen,
   const [running, setRunning] = useState(false);
   const [output, setOutput] = useState("");
   const [meta, setMeta] = useState<{ provider?: string; fallacies?: { name: string; quote: string; reason: string }[] }>({});
+  // 0.1.5 H1：交互槽失败动作 toast（切换/重试/离线模板三钮）
+  const [slotFail, setSlotFail] =
+    useState<{ failed: string; reason: string; next: string | null } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const outRef = useRef<HTMLDivElement>(null);
 
@@ -91,11 +94,12 @@ export default function RebutPanel({ stances, prefill, setSide, setRightOpen,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stance]);
 
-  const run = async () => {
+  const run = async (providerOverride?: string) => {
     if (!argument.trim() || running) return;
     setRunning(true);
     setOutput("");
     setMeta({});
+    setSlotFail(null);
     const ctl = new AbortController();
     abortRef.current = ctl;
     try {
@@ -108,8 +112,13 @@ export default function RebutPanel({ stances, prefill, setSide, setRightOpen,
         center: center || null, stream: true,
         intent: STYLE_INTENT[style] || "rebut",
         material_ids: materialIds,
+        provider: providerOverride || null,
       }, (evt) => {
-        if (evt.event === "meta") {
+        if (evt.event === "slot_failed") {
+          // H1：不自动降级，交用户拍板
+          setSlotFail(evt.data as unknown as
+            { failed: string; reason: string; next: string | null });
+        } else if (evt.event === "meta") {
           setMeta({
             provider: evt.data.provider as string,
             fallacies: evt.data.detected_fallacies as never[],
@@ -121,6 +130,8 @@ export default function RebutPanel({ stances, prefill, setSide, setRightOpen,
           const quality = evt.data.quality as Record<string, number> | undefined;
           const note = evt.data.length_note as string | null;
           if (note) notify(note);
+          // 0.1.5 A1：中立评价存档提示
+          if (evt.data.neutral_archived) notify("已存入中立评价档案");
           setRightOpen(true);
           setSide({
             title: "引用来源",
@@ -195,7 +206,7 @@ export default function RebutPanel({ stances, prefill, setSide, setRightOpen,
         </label>
         {running
           ? <button className="primary stop" onClick={stop}>停止</button>
-          : <button className="primary" onClick={run} disabled={!argument.trim()}>
+          : <button className="primary" onClick={() => run()} disabled={!argument.trim()}>
               生成回答（Ctrl+Enter）</button>}
         <button className="fold" onClick={() => setAdvOpen(!advOpen)}>
           高级 {advOpen ? "▾" : "▸"}</button>
@@ -234,6 +245,19 @@ export default function RebutPanel({ stances, prefill, setSide, setRightOpen,
 
       {demoStyle && (
         <div className="demo-warn">⚠ 反面演示风格——输出将展示错误论证方式，仅供识别学习，勿实际使用</div>
+      )}
+      {/* 0.1.5 H1：槽失败动作 toast（不自动降级，三钮交用户拍板） */}
+      {slotFail && !running && (
+        <div className="demo-warn slot-toast">
+          ① {slotFail.failed} 失败（{slotFail.reason}）。
+          {slotFail.next ? <>切到 ② {slotFail.next}？</> : <>无后备槽。</>}
+          <span className="controls" style={{ display: "inline-flex", gap: 6, marginLeft: 8 }}>
+            {slotFail.next && (
+              <button onClick={() => run(slotFail.next!)}>切换</button>)}
+            <button onClick={() => run(slotFail.failed)}>重试</button>
+            <button onClick={() => run("offline")}>离线模板</button>
+          </span>
+        </div>
       )}
       {meta.fallacies && meta.fallacies.length > 0 && (
         <div className="fallacy-box">

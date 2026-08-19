@@ -44,7 +44,7 @@ _REGISTRY: dict[str, dict] = {
         "desc": "扫描版 PDF / 图片文字识别，装完导入自动启用",
         "urls": [f"{_GH}/ocr-win64.zip", f"{_MS}=ocr-win64.zip"],
         "target": lambda: config.EXTRAS_PATH / "ocr",
-        "pip_dev": ["rapidocr-onnxruntime"],
+        "pip_dev": ["rapidocr-onnxruntime", "pypdfium2"],
     },
     "docling": {
         "label": "文档解析增强（Docling）", "kind": "python", "size_hint": "~500MB",

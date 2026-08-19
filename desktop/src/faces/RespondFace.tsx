@@ -7,6 +7,7 @@ import type { StanceOpt } from "../App";
 import ComparePanel from "../panels/ComparePanel";
 import RebutPanel from "../panels/RebutPanel";
 import { ReportPanel } from "../panels/ReportPanel";
+import SegmentedSlider from "../components/SegmentedSlider";
 
 interface BasketItem { id: number; item_type: string; ref_id: string;
                        excerpt: string; source: string; used: number;
@@ -216,7 +217,13 @@ export default function RespondFace({
               </div>
             );
           })}
-          <button className="link pad-h" onClick={addGroup}>+ 新建素材组</button>
+          {/* 0.1.5 K2：+ 号改自绘 plus 图标，与组头 chevron 同列宽 */}
+          <button className="add-group" onClick={addGroup}>
+            <svg width="10" height="10" viewBox="0 0 10 10">
+              <path d="M5 1.5v7M1.5 5h7" />
+            </svg>
+            新建素材组
+          </button>
         </div>
 
         <div className="col-head">
@@ -244,12 +251,11 @@ export default function RespondFace({
 
       {/* 中央：意图 → 生成 */}
       <main className="resp-center">
-        <div className="seg intent-seg">
-          {INTENTS.map((it) => (
-            <button key={it.key} className={intent === it.key ? "seg-on" : ""}
-                    onClick={() => { setIntent(it.key); setHistSel(null); }}>
-              {it.label}</button>
-          ))}
+        {/* 0.1.5 J7：回应三段改滑移分段器 */}
+        <div className="seg-row intent-seg">
+          <SegmentedSlider value={intent}
+            onChange={(k) => { setIntent(k); setHistSel(null); }}
+            options={INTENTS.map((it) => ({ key: it.key, label: it.label }))} />
           <div className="spacer" />
           <button className="fold" onClick={() => setSideOpen(!sideOpen)}
                   title={sideOpen ? "收起页边注" : "展开页边注"}>

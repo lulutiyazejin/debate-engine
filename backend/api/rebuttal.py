@@ -32,6 +32,8 @@ class RebuttalRequest(BaseModel):
     intent: str = Field(default="rebut",
                         pattern="^(rebut|critique|evaluate)$")
     material_ids: list[int] = Field(default_factory=list, max_length=20)
+    # 0.1.5 H1：用户拍板后重进的指定槽（含 offline=离线模板）；缺省槽 1
+    provider: str | None = None
 
 
 @router.get("/rebuttal/options")
@@ -85,8 +87,11 @@ def rebuttal(req: RebuttalRequest):
 
     def sse():
         acc: dict = {"citations": [], "provider": "", "rebuttal": ""}
+        # 0.1.5 H1：流式入口走交互槽（失败推 slot_failed，不自动降级）
         for evt in engine.generate_stream(req.argument, req.stance,
-                                          req.format, req.style, **kw):
+                                          req.format, req.style,
+                                          provider=req.provider,
+                                          interactive=True, **kw):
             if evt["event"] == "meta":
                 acc["provider"] = evt["data"].get("provider", "")
             elif evt["event"] == "delta":
@@ -95,6 +100,7 @@ def rebuttal(req: RebuttalRequest):
                 acc["citations"] = evt["data"].get("citations", [])
             payload = json.dumps(evt["data"], ensure_ascii=False)
             yield f"event: {evt['event']}\ndata: {payload}\n\n"
-        _record(engine, req, acc)
+        if acc["rebuttal"]:   # slot_failed 早退时不落空历史
+            _record(engine, req, acc)
 
     return StreamingResponse(sse(), media_type="text/event-stream")

@@ -55,27 +55,58 @@ export default function GraphPanel({ stances, docs, notify, active, onChain,
   const hostRef = useRef<HTMLDivElement>(null);
   const fgRef = useRef<any>(null);          // 批 1：显式管缩放的图谱实例
   const freshLoad = useRef(false);          // 批 1：仅全量重载后拟合镜头
+  const relFilterRef = useRef(relFilter);   // 0.1.5 I8：linkVisibility 读 ref，不换 graphData
+  relFilterRef.current = relFilter;
+  const lastKey = useRef("");               // 0.1.5 I8 保险：同过滤回切保镜头
 
   const stanceColor = useCallback((s?: string) => {
     const i = stances.findIndex((x) => x.name === s);
     return cssVar(`--stance-${(((i < 0 ? 0 : i) % 6) + 1)}`, "#7d9ec7");
   }, [stances]);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (preserveCam = false) => {
     try {
       const q = new URLSearchParams();
       if (stance) q.set("stance", stance);
       if (docId) q.set("doc_id", docId);
       const r = await api.get<{ nodes: GNode[]; links: GLink[] }>(
         `/api/analysis/graph?${q}`);
-      freshLoad.current = true;   // 全量重载 → 允许拟合一次镜头
+      // 0.1.5 I8 保险：真换数据路径——换前读镜头换后写回（同过滤重拉/纠错回写）；
+      // 过滤变化才走 freshLoad 拟合
+      let cam: { k: number; x: number; y: number } | null = null;
+      if (preserveCam && fgRef.current) {
+        const c = fgRef.current.centerAt();
+        cam = { k: fgRef.current.zoom(), x: c.x, y: c.y };
+      }
+      freshLoad.current = !cam;
       setData(r);
+      if (cam) {
+        // 下一帧写回（引擎接管新数据后）；用户此刻无法插入滚轮操作，不会覆盖用户镜头
+        requestAnimationFrame(() => {
+          if (fgRef.current && cam) {
+            fgRef.current.centerAt(cam.x, cam.y, 0);
+            fgRef.current.zoom(cam.k, 0);
+          }
+        });
+      }
     } catch (e) {
       notify(`加载图谱失败: ${e}`);
     }
   }, [stance, docId, notify]);
 
-  useEffect(() => { if (active) load(); }, [active, load]);
+  useEffect(() => {
+    if (!active) return;
+    const key = `${stance}|${docId}`;
+    load(key === lastKey.current);   // 同过滤回切 → 保镜头；换过滤 → 拟合
+    lastKey.current = key;
+  }, [active, load, stance, docId]);
+
+  // 0.1.5 I1：always-mount 后离面时暂停力导引擎，回面恢复
+  useEffect(() => {
+    const fg = fgRef.current;
+    if (!fg) return;
+    if (active) fg.resumeAnimation?.(); else fg.pauseAnimation?.();
+  }, [active]);
 
   // 容器自适应（批 1：等值守卫斩断「测量→setState→重排→再测量」自反馈回环）
   useEffect(() => {
@@ -96,7 +127,7 @@ export default function GraphPanel({ stances, docs, notify, active, onChain,
         "/api/analysis/relations/build", { doc_ids: docId ? [docId] : null });
       notify(`配对检查 ${r.pairs_checked} 组，写入关系边 ${r.relations_written} 条` +
         (r.relations_written === 0 ? "（离线模式不下结论，需配置模型 Key）" : ""));
-      load();
+      load(true);   // I8：同过滤重拉，保镜头
     } catch (e) {
       notify(`生成关系失败: ${e}`);
     } finally {
@@ -110,7 +141,7 @@ export default function GraphPanel({ stances, docs, notify, active, onChain,
     try {
       await api.del(`/api/analysis/units/${node.id}`);
       notify("已删除");
-      load();
+      load(true);
     } catch (e) {
       notify(`删除失败: ${e}`);
     }
@@ -123,7 +154,7 @@ export default function GraphPanel({ stances, docs, notify, active, onChain,
     try {
       await api.patch(`/api/analysis/units/${node.id}`, { claim: claim.trim() });
       notify("已修正");
-      load();
+      load(true);
     } catch (e) {
       notify(`修正失败: ${e}`);
     }
@@ -172,9 +203,9 @@ export default function GraphPanel({ stances, docs, notify, active, onChain,
             </button>
           );
         })}
-        {relFilter.length > 0 && (
-          <button className="link" onClick={() => setRelFilter([])}>全部</button>
-        )}
+        {/* 0.1.5 J10：「全部」复位钮滑移化（常驻占位，120ms 透明度出场） */}
+        <button className={"link chip-clear" + (relFilter.length > 0 ? " on" : "")}
+                onClick={() => setRelFilter([])}>全部</button>
       </div>
       <div ref={hostRef} style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
         {data.nodes.length === 0
@@ -184,10 +215,12 @@ export default function GraphPanel({ stances, docs, notify, active, onChain,
             </div>
           : <ForceGraph2D
               ref={fgRef}
-              graphData={relFilter.length === 0 ? data : {
-                nodes: data.nodes,
-                links: data.links.filter((l) => relFilter.includes(l.relation)),
-              }}
+              /* 0.1.5 I8 主解：chip 过滤走视图层显隐（linkVisibility），
+                 graphData 恒同对象——引擎零重热，连点不缩不漂（社区 #531 定论） */
+              graphData={data}
+              linkVisibility={(l: GLink) =>
+                relFilterRef.current.length === 0 ||
+                relFilterRef.current.includes(l.relation)}
               width={size.w}
               height={size.h}
               cooldownTicks={100}
@@ -205,7 +238,9 @@ export default function GraphPanel({ stances, docs, notify, active, onChain,
               linkColor={(l: GLink) => edgeColor(l.relation)}
               linkWidth={2}
               linkLineDash={(l: GLink) => (l.relation === "refine" || l.relation === "analogy" ? [4, 3] : null)}
-              linkDirectionalArrowLength={5}
+              linkDirectionalArrowLength={(l: GLink) =>
+                relFilterRef.current.length === 0 ||
+                relFilterRef.current.includes(l.relation) ? 5 : 0}
               onNodeRightClick={(n: GNode, e: MouseEvent) => {
                 e.preventDefault();
                 setMenu({ x: e.clientX, y: e.clientY, node: n });

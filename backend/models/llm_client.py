@@ -55,10 +55,22 @@ class Provider:
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
-        payload = {"model": self.model, "messages": messages,
-                   "max_tokens": max_tokens, "temperature": temperature}
+        # 0.1.5 F2：ollama 分支改原生 /api/chat 传 options.num_ctx
+        # （OpenAI 兼容层不收 num_ctx，本地窗口被默认 ≈4k 腰斩）
+        if self.name == "ollama":
+            from models.model_matrix import effective_ctx
+            url = self.base_url.replace("/v1", "") + "/api/chat"
+            payload = {"model": self.model, "messages": messages,
+                       "stream": False,
+                       "options": {"num_ctx": effective_ctx(self.model),
+                                   "temperature": temperature,
+                                   "num_predict": max_tokens}}
+            timeout = max(timeout, 300.0)   # 大窗本地推理给足时间
+        else:
+            url = f"{self.base_url}/chat/completions"
+            payload = {"model": self.model, "messages": messages,
+                       "max_tokens": max_tokens, "temperature": temperature}
         # 代理三态（0.1.3 B6）：本地地址永远直连，custom 只走自填地址
-        url = f"{self.base_url}/chat/completions"
         px = {"proxy": config.httpx_proxy_for(url),
               "trust_env": config.httpx_trust_env_for(url)}
         with Timer() as t:
@@ -102,14 +114,22 @@ class Provider:
             raise LLMError("other", f"{self.name} HTTP {r.status_code}")
 
         data = r.json()
-        usage = data.get("usage", {})
-        content = data["choices"][0]["message"]["content"]
+        # 0.1.5 F2：ollama 原生响应格式（message.content + eval_count）
+        if self.name == "ollama" and "message" in data:
+            content = data["message"]["content"]
+            in_toks = data.get("prompt_eval_count", 0)
+            out_toks = data.get("eval_count", 0)
+        else:
+            usage = data.get("usage", {})
+            content = data["choices"][0]["message"]["content"]
+            in_toks = usage.get("prompt_tokens", 0)
+            out_toks = usage.get("completion_tokens", 0)
         # 部分推理模型输出 <think> 块，剥离
         if "</think>" in content:
             content = content.split("</think>")[-1].strip()
         log_api_call(trace_id, task, self.name, self.model, "success", t.ms,
-                     input_tokens=usage.get("prompt_tokens", 0),
-                     output_tokens=usage.get("completion_tokens", 0))
+                     input_tokens=in_toks,
+                     output_tokens=out_toks)
         return content
 
 

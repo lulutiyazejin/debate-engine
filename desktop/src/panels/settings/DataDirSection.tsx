@@ -4,7 +4,10 @@ import { useEffect, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api, engineBase } from "../../api";
 
-interface DataRoot { path: string; marker: string; overridden: boolean }
+interface DataRoot {
+  path: string; marker: string; overridden: boolean;
+  old_path?: string; old_size_bytes?: number; old_rollback_ok?: boolean;
+}
 
 export default function DataDirSection({ notify }: { notify: (msg: string) => void }) {
   const [root, setRoot] = useState<DataRoot | null>(null);
@@ -60,6 +63,19 @@ export default function DataDirSection({ notify }: { notify: (msg: string) => vo
     finally { setMigrating(false); }
   };
 
+  // 0.1.5 D5：回滚到旧目录（删标记回默认路径，需旧库在）
+  const rollback = async () => {
+    if (!window.confirm(`回滚到旧目录？\n${root?.old_path}\n重启软件后生效；迁移后的目录保留不删。`)) return;
+    try {
+      const r = await api.post<{ ok: boolean; detail: string }>(
+        "/api/config/data-root/rollback", {});
+      notify(r.detail);
+      api.get<DataRoot>("/api/config/data-root").then(setRoot).catch(() => {});
+    } catch (e) { notify(`回滚失败: ${e}`); }
+  };
+  const fmtSize = (b: number) =>
+    b > 1073741824 ? `${(b / 1073741824).toFixed(1)} GB` : `${(b / 1048576).toFixed(0)} MB`;
+
   return (
     <>
       <h3>数据目录</h3>
@@ -80,7 +96,17 @@ export default function DataDirSection({ notify }: { notify: (msg: string) => vo
         ) : (
           <button onClick={migrate}>迁移到新目录…</button>
         )}
+        {!migrating && root?.overridden && (
+          <button disabled={!root.old_rollback_ok}
+                  title={root.old_rollback_ok ? "" : "旧目录无 knowledge.db，不能回滚"}
+                  onClick={rollback}>
+            回滚到旧目录{root.old_size_bytes
+              ? `（${fmtSize(root.old_size_bytes)}）` : ""}…</button>
+        )}
       </div>
+      {root?.overridden && root.old_path && (
+        <p className="muted small">旧目录：{root.old_path}</p>
+      )}
     </>
   );
 }

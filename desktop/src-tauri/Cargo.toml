@@ -1,6 +1,6 @@
 [package]
 name = "desktop"
-version = "0.1.4"
+version = "0.1.5"
 description = "Debate Engine 桌面壳：托管 Python 引擎（隐藏子进程）+ WebView 界面"
 authors = ["debate-engine"]
 edition = "2021"

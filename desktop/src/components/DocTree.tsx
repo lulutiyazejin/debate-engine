@@ -78,10 +78,19 @@ export default function DocTree({ docs, stances, stats, selectedId,
       <div className="tree-tools">
         <input value={filter} placeholder="过滤：标题 / 作者 / 拼音首字母"
                onChange={(e) => setFilter(e.target.value)} />
-        <button className="link" title="全部展开"
-                onClick={() => saveFold(new Set())}>展</button>
-        <button className="link" title="全部收起"
-                onClick={() => saveFold(new Set([...groups.keys()]))}>收</button>
+        {/* 0.1.5 K1：展/收符号化——同族双 chevron 线型，开放折线不闭合 */}
+        <button className="tree-chev" title="全部展开"
+                onClick={() => saveFold(new Set())}>
+          <svg width="12" height="12" viewBox="0 0 12 12">
+            <path d="M2.5 3l3.5 3 3.5-3M2.5 6.5l3.5 3 3.5-3" />
+          </svg>
+        </button>
+        <button className="tree-chev" title="全部收起"
+                onClick={() => saveFold(new Set([...groups.keys()]))}>
+          <svg width="12" height="12" viewBox="0 0 12 12">
+            <path d="M2.5 9l3.5-3 3.5 3M2.5 5.5l3.5-3 3.5 3" />
+          </svg>
+        </button>
       </div>
       <div className="tree">
         {docs.length === 0 && (

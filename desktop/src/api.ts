@@ -79,6 +79,7 @@ export interface RebutRequest {
   stream: true;
   intent?: string;               // rebut | critique | evaluate（0.1.2 项目16）
   material_ids?: number[];       // 素材篮注入（0.1.2 项目18）
+  provider?: string | null;      // 0.1.5 H1：用户拍板后重进的指定槽（含 offline）
 }
 
 export interface SseEvent {

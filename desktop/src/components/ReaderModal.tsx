@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import { api, engineBase } from "../api";
 import { mdToHtml } from "../lib/md";
+import { sanitizeHtml } from "../lib/sanitize";
 
 interface ViewData {
   doc_id: string; title: string; author: string; format: string;
@@ -20,6 +21,7 @@ export default function ReaderModal({ docId, onClose }: Props) {
   const [data, setData] = useState<ViewData | null>(null);
   const [err, setErr] = useState("");
   const [pdfText, setPdfText] = useState(false);   // pdf 文本模式切换
+  const [pdfFail, setPdfFail] = useState(false);   // 0.1.5 D2：iframe 失败回退外链
 
   const load = (sheet = "", page = 0) => {
     api.get<ViewData>(`/api/docs/${docId}/view?sheet=${encodeURIComponent(sheet)}&page=${page}`)
@@ -70,8 +72,9 @@ export default function ReaderModal({ docId, onClose }: Props) {
           )}
 
           {data?.kind === "html" && (
+            /* 0.1.5 D2：mammoth HTML 白名单净化后再注入（剥 script/on*） */
             <div className="reader-md"
-                 dangerouslySetInnerHTML={{ __html: data.content || "" }} />
+                 dangerouslySetInnerHTML={{ __html: sanitizeHtml(data.content || "") }} />
           )}
 
           {data?.kind === "table" && (
@@ -111,7 +114,14 @@ export default function ReaderModal({ docId, onClose }: Props) {
           {data?.kind === "pdf" && (
             pdfText
               ? <pre className="reader-txt">{data.text || "（无文字层）"}</pre>
-              : <iframe className="reader-frame" src={fileUrl} title={data.title} />
+              : pdfFail
+                ? <p className="muted">
+                    内嵌 PDF 加载失败。
+                    <a className="link" href={fileUrl} target="_blank" rel="noreferrer">打开原件 ↗</a>
+                    或切换上方「文本模式」。
+                  </p>
+                : <iframe className="reader-frame" src={fileUrl} title={data.title}
+                          onError={() => setPdfFail(true)} />
           )}
 
           {data?.kind === "image" && (

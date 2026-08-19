@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS documents (
     original_lang  TEXT,
     author_years   TEXT,
     school       TEXT,
+    year_raw     TEXT,
     manual_fields TEXT,
     created_at   TEXT,
     updated_at   TEXT,
@@ -135,7 +136,7 @@ CREATE INDEX IF NOT EXISTS idx_docs_stance ON documents(stance, deleted_at);
 """
 
 # 旧库增量迁移：(表, 列, 列定义)。SQLite 不支持 ALTER 加外键，
-# 外键约束仅对全新库生效，旧库靠业务层级联逻辑兑底。
+# 外键约束仅对全新库生效，旧库靠业务层级联逻辑保底。
 _MIGRATIONS: list[tuple[str, str, str]] = [
     ("basket", "group_id", "INTEGER"),      # 0.1.4 批 4：素材必属一组
     ("documents", "content_hash", "TEXT"),
@@ -161,6 +162,8 @@ _MIGRATIONS: list[tuple[str, str, str]] = [
     ("documents", "author_years", "TEXT"),
     ("documents", "school", "TEXT"),
     ("documents", "manual_fields", "TEXT"),
+    # 0.1.5 I2：日期原文回显（year 存整数年接筛选，year_raw 存原文）
+    ("documents", "year_raw", "TEXT"),
 ]
 
 
@@ -204,7 +207,8 @@ class SqliteStore(MetadataStoreBase):
     # ---------- documents ----------
     # 0.1.3 元数据列（B1）：schema/迁移/本清单三处必须同步，防分享包丢字段
     _DOC_META_COLS = ("translator", "publisher", "edition", "original_title",
-                      "original_lang", "author_years", "school", "manual_fields")
+                      "original_lang", "author_years", "school", "year_raw",
+                      "manual_fields")
     
     def upsert_document(self, doc: dict) -> None:
         """UPSERT：重复写入保留 created_at，只更 updated_at（服务器级规范）。"""

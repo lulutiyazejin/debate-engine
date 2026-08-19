@@ -20,7 +20,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import config
 config.mount_extras()   # 组件中心（0.1.4）：已装组件包先挂 sys.path 再注册路由
 from api import (analysis, components, diagnostics, files, import_doc,
-                 kb_package, knowledge, rebuttal, settings, stances, workspace)
+                 kb_package, knowledge, local_models, rebuttal, settings,
+                 stances, workspace)
 from applog import log_system
 
 
@@ -42,6 +43,7 @@ app.include_router(components.router)
 app.include_router(files.router)
 app.include_router(knowledge.router)
 app.include_router(settings.router)
+app.include_router(local_models.router)
 app.include_router(kb_package.router)
 app.include_router(analysis.router)
 app.include_router(stances.router)

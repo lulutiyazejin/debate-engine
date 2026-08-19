@@ -16,6 +16,19 @@ from applog import log_error, new_trace_id
 from models.llm_client import LLMError, Provider, build_providers
 
 
+class SlotFailure(Exception):
+    """0.1.5 H1：交互场景槽失败事件——携带失败槽/原因/下一槽，
+    前端动作 toast 交用户拍板（切换/重试/离线模板），不自动降级。"""
+
+    def __init__(self, failed: str, reason: str, next_name: str | None):
+        self.failed, self.reason, self.next = failed, reason, next_name
+        super().__init__(f"{failed} failed ({reason})")
+
+
+_REASON_LABEL = {"rate_limit": "限流", "timeout": "超时", "auth": "鉴权失败",
+                 "content_filter": "内容过滤", "other": "请求失败"}
+
+
 class ModelRouter:
     def __init__(self, providers: dict[str, Provider] | None = None):
         self.providers = providers or build_providers()
@@ -65,6 +78,40 @@ class ModelRouter:
                   f"last={last_err}", auto_fix="offline_fallback")
         offline = self.providers["offline"]
         return offline.chat(messages, task=task, trace_id=trace_id), "offline"
+
+    def run_interactive(self, task: str, messages: list[dict],
+                        provider: str | None = None,
+                        trace_id: str | None = None, **kw) -> tuple[str, str]:
+        """0.1.5 H1 交互场景：槽 1（首个可用槽）失败不自动降级，
+        抛 SlotFailure(failed, reason, next) 交前端动作 toast；
+        provider 指定时（用户拍板后重进）只试该槽；offline 直接模板。"""
+        trace_id = trace_id or new_trace_id()
+        if provider == "offline":
+            offline = self.providers["offline"]
+            return offline.chat(messages, task=task, trace_id=trace_id), "offline"
+        chain = [n for n in self._chain(task) if n in self.providers]
+        avail = [n for n in chain if self.providers[n].available()]
+        if provider is None:
+            if not avail:   # 全部未配置/不可用 → 离线回退（与静默路径一致）
+                offline = self.providers["offline"]
+                return (offline.chat(messages, task=task, trace_id=trace_id),
+                        "offline")
+            provider = avail[0]
+        after = avail[avail.index(provider) + 1:] if provider in avail else avail
+        nxt = after[0] if after else None
+        p = self.providers.get(provider)
+        if p is None or not p.available():
+            raise SlotFailure(provider, "不可用", nxt)
+        try:
+            out = p.chat(messages, task=task, trace_id=trace_id, **kw)
+            return out, provider
+        except LLMError as e:
+            log_error(trace_id, "model_router",
+                      f"interactive slot failed task={task} "
+                      f"provider={provider} kind={e.kind}",
+                      auto_fix="await_user_action")
+            raise SlotFailure(provider,
+                              _REASON_LABEL.get(e.kind, e.kind), nxt) from e
 
     def health(self) -> dict[str, bool]:
         return {n: p.available() for n, p in self.providers.items()

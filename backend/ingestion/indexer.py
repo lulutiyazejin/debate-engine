@@ -55,6 +55,7 @@ class ImportPreview:
     web_enrich: dict = field(default_factory=dict)   # {fields, source, reports}
 
     def to_dict(self) -> dict:
+        from ingestion.summarizer import _MAX_INPUT_CHARS
         return {"doc_id": self.doc_id, "trace_id": self.trace_id,
                 "source": self.source, "title": self.parsed.title,
                 "author": self.parsed.author, "year": self.parsed.year,
@@ -62,6 +63,10 @@ class ImportPreview:
                 "chapters": len(self.parsed.sections),
                 "chunks": len(self.chunks),
                 "token_estimate": self.token_estimate,
+                "long_chapters": sum(1 for c in self.chunks
+                                     if len(c.text) > _MAX_INPUT_CHARS),  # F5
+                "attachments": self.parsed.raw_metadata.get("attachments")
+                               or [],   # 0.1.5 A5
                 "doc_summary": self.doc_summary,
                 "coordinates": self.coordinates,
                 "classification": self.classification,
@@ -154,8 +159,9 @@ class Indexer:
             pv.author_recognized = author or ai_author or ""
             res = _enrich(author=pv.author_recognized, title=title)
             pv.web_enrich = res
-            # 只补空值
-            for k in ("translator", "publisher", "school", "author_years"):
+            # 只补空值（A3：edition 同轨）
+            for k in ("translator", "publisher", "school", "author_years",
+                      "edition"):
                 if not res["fields"].get(k):
                     res["fields"].pop(k, None)
         except Exception:
@@ -251,7 +257,9 @@ class Indexer:
         if self._done(doc_id, "__doc__", "doc_summary") and extras.get("doc_summary"):
             doc_summary = extras["doc_summary"]
         else:
-            strat = pick_strategy(strategy, sum(c.token_count for c in chunks))
+            strat = pick_strategy(strategy,
+                                  sum(c.token_count for c in chunks),
+                                  router=self.router)   # F4：读槽 1 窗判墙
             if strat == "full_context":
                 doc_summary = summarize_full_context(
                     parsed.full_text, router=self.router, trace_id=trace_id)

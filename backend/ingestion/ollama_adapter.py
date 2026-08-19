@@ -85,6 +85,95 @@ def models_list() -> list[str] | None:
     return [m["name"].split(":")[0] for m in j.get("models") or []]
 
 
+def runtime_version() -> str | None:
+    """0.1.5 G2：读 Ollama 运行时版本（/api/version），供矩阵 min_runtime 比对。"""
+    j = _fetch_json(f"{OLLAMA_HOST}/api/version", timeout=1.0)
+    if isinstance(j, dict) and j.get("version"):
+        return str(j["version"])
+    return None
+
+
+_SERVE_PROC = None   # 一键拉起的子进程句柄（随引擎生命周期）
+
+
+def download_channel() -> dict:
+    """0.1.5 F3b：下载通道事实——真正的模型下载发生在 Ollama 进程内，
+    只有经本软件拉起（注入代理环境变量）的实例才走代理。"""
+    cfg = config.proxy_config()
+    via = _SERVE_PROC is not None and _SERVE_PROC.poll() is None
+    if cfg["mode"] == "custom" and cfg["url"] and via:
+        return {"mode": "proxy", "detail": cfg["url"]}
+    if cfg["mode"] == "system" and via:
+        return {"mode": "system", "detail": "跟随系统代理"}
+    return {"mode": "direct", "detail": "直连"}
+
+
+def serve_start() -> tuple[bool, str]:
+    """0.1.5 F3b：一键启动 Ollama——子进程 `ollama serve` 注入
+    HTTPS_PROXY/HTTP_PROXY=代理三态地址，CREATE_NO_WINDOW 隐藏窗（记忆公约）。"""
+    global _SERVE_PROC
+    import os
+    import shutil
+    import subprocess
+    import time
+    if is_installed():
+        return True, "Ollama 已在运行（若需代理下载，请先退出它再由本软件拉起）"
+    exe = shutil.which("ollama")
+    if not exe:
+        return False, "未找到 ollama 可执行文件，请先安装：https://ollama.ai/download"
+    env = dict(os.environ)
+    cfg = config.proxy_config()
+    if cfg["mode"] == "custom" and cfg["url"]:
+        env["HTTPS_PROXY"] = env["HTTP_PROXY"] = cfg["url"]
+    elif cfg["mode"] == "off":
+        env.pop("HTTPS_PROXY", None)
+        env.pop("HTTP_PROXY", None)
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        _SERVE_PROC = subprocess.Popen([exe, "serve"], env=env,
+                                       stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.DEVNULL,
+                                       creationflags=flags)
+    except OSError as e:
+        return False, f"拉起失败：{e}"
+    for _ in range(20):   # 最多等 10s 就绪
+        time.sleep(0.5)
+        if is_installed():
+            ch = download_channel()
+            return True, f"Ollama 已启动（下载通道：{ch['detail']}）"
+    return False, "已拉起但 10 秒内未就绪，请稍后刷新状态"
+
+
+def import_gguf(path: str, name: str) -> tuple[bool, str]:
+    """0.1.5 F3c：本地 GGUF 导入——写临时 Modelfile 后 `ollama create`，
+    全断网保底；隐藏窗执行。"""
+    import subprocess
+    import tempfile
+    p = Path(path)
+    if not p.exists() or p.suffix.lower() != ".gguf":
+        return False, f"文件不存在或不是 .gguf：{path}"
+    import shutil
+    exe = shutil.which("ollama")
+    if not exe:
+        return False, "未找到 ollama 可执行文件"
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    with tempfile.NamedTemporaryFile("w", suffix=".Modelfile", delete=False,
+                                     encoding="utf-8") as f:
+        f.write(f"FROM {p}\n")
+        mf = f.name
+    try:
+        r = subprocess.run([exe, "create", name, "-f", mf],
+                           capture_output=True, text=True, timeout=1800,
+                           creationflags=flags)
+        if r.returncode == 0:
+            return True, f"已导入为本地模型 {name}"
+        return False, (r.stderr or r.stdout or "导入失败")[:300]
+    except subprocess.TimeoutExpired:
+        return False, "导入超时（30 分钟）"
+    finally:
+        Path(mf).unlink(missing_ok=True)
+
+
 def pull_stream(name: str):
     """流式 pull（B7）：逐行读 Ollama /api/pull 的 NDJSON，产出
     {status, percent} 进度事件，最后产出 {done, ok, detail} 收尾事件。"""
@@ -140,10 +229,8 @@ def pull_model(name: str, progress_cb=None) -> tuple[bool, str]:
     return bool(final.get("ok")), str(final.get("detail", ""))
 
 
-LOCAL_MODEL_CANDIDATES = {
-    "qwen2.5:7b": "通用（推荐）",
-    "qwen2.5:3b": "轻量",
-    "gemma2:9b": "英文友好",
-    "mistral-nemo": "中等体量",
-    "phi3.5:ministral": "推理强",
-}
+# 0.1.5 F1/G2：精选卡清单改读模型矩阵（单一真源）；
+# 「其他模型」自由输入在 UI 层，pull 端点无白名单限制。
+def candidates() -> list[dict]:
+    from models.model_matrix import MATRIX
+    return [dict(m) for m in MATRIX]

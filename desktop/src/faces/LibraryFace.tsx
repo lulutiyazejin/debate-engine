@@ -8,11 +8,13 @@ import type { DocRow, StanceOpt } from "../App";
 import Combobox, { Hl } from "../components/Combobox";
 import DocTree from "../components/DocTree";
 import ReaderModal from "../components/ReaderModal";
+import SegmentedSlider from "../components/SegmentedSlider";
 import ComparePanel from "../panels/ComparePanel";
 import GraphPanel from "../panels/GraphPanel";
 import ImportPanel from "../panels/ImportPanel";
 import ChainView from "../views/ChainView";
 import TimelineView from "../views/TimelineView";
+import ArchiveView from "../views/ArchiveView";
 
 interface Chunk { chunk_id: string; doc_id: string; text: string;
                   score?: number; [k: string]: unknown }
@@ -38,6 +40,7 @@ const VIEWS = [
   { key: "chain", label: "逻辑链" },
   { key: "timeline", label: "脉络" },
   { key: "compare", label: "对比" },
+  { key: "archive", label: "档案" },   // 0.1.5 D4
 ] as const;
 
 export default function LibraryFace({
@@ -167,6 +170,15 @@ export default function LibraryFace({
       setView("chain");
     } else if (action === "read") {
       setReaderDoc(doc.doc_id);   // 0.1.4 批 6：统一阅读器
+    } else if (action === "resummarize") {
+      // 0.1.5 I3：补生成摘要（回写 documents.summary + 档案 md + INDEX）
+      notify("补生成摘要中…");
+      try {
+        await api.post(`/api/knowledge/docs/${doc.doc_id}/resummarize`, {});
+        notify("摘要已补生成并回写档案");
+        refreshDocs();
+        if (dossier?.doc_id === doc.doc_id) showDossier(doc);
+      } catch (e) { notify(`补摘要失败: ${e}`); }
     } else if (action === "delete") {
       if (!window.confirm(`确定删除「${doc.title || doc.doc_id}」？\n将级联清除章节、切块、向量；档案库归档默认保留。`)) return;
       try {
@@ -176,7 +188,8 @@ export default function LibraryFace({
         refreshDocs();
       } catch (e) { notify(`删除失败: ${e}`); }
     }
-  }, [notify, refreshDocs, stanceLabel, respondWith, addBasket, dossier]);
+  }, [notify, refreshDocs, stanceLabel, respondWith, addBasket, dossier,
+      showDossier]);
 
   const hasSearch = paraHits !== null || unitHits !== null;
 
@@ -210,14 +223,15 @@ export default function LibraryFace({
         <main className="lib-center">
           {hasSearch ? (
             <div className="search-results">
-              <div className="seg">
-                {(["para", "units", "era"] as const).map((t) => (
-                  <button key={t} className={searchTab === t ? "seg-on" : ""}
-                          onClick={() => setSearchTab(t)}>
-                    {t === "para" ? `段落 ${paraHits?.length ?? 0}`
-                      : t === "units" ? `论点 ${unitHits?.length ?? 0}` : "脉络"}
-                  </button>
-                ))}
+              {/* 0.1.5 J7：检索三视角改滑移分段器 */}
+              <div className="seg-row">
+                <SegmentedSlider value={searchTab}
+                  onChange={(k) => setSearchTab(k as typeof searchTab)}
+                  options={[
+                    { key: "para", label: `段落 ${paraHits?.length ?? 0}` },
+                    { key: "units", label: `论点 ${unitHits?.length ?? 0}` },
+                    { key: "era", label: "脉络" },
+                  ]} />
                 <div className="spacer" />
                 <button className="link" onClick={() => { setParaHits(null); setUnitHits(null); }}>
                   返回画布 ×</button>
@@ -272,14 +286,15 @@ export default function LibraryFace({
             </div>
           ) : (
             <>
-              <div className="seg view-seg">
-                {VIEWS.map((v) => (
-                  <button key={v.key} className={view === v.key ? "seg-on" : ""}
-                          onClick={() => setView(v.key)}>{v.label}</button>
-                ))}
+              {/* 0.1.5 J7：馆藏五段改滑移分段器（120ms 固定时长，键盘 ←→ 可切） */}
+              <div className="seg-row view-seg">
+                <SegmentedSlider value={view} onChange={setView}
+                  options={VIEWS.map((v) => ({ key: v.key, label: v.label }))} />
               </div>
               <div className="lib-canvas">
-                {view === "collection" && (
+                {/* 0.1.5 I1：五视图 always-mount + 显隐切换（display:contents/none），
+                    导入 busy/预览切面不丢；graph 离面 pauseAnimation 由 active 控 */}
+                <div style={{ display: view === "collection" ? "contents" : "none" }}>
                   <div className="coll-split">
                     {/* 批 2/项目 22：文档树收进馆藏主从布局，知识库面去常驻左栏 */}
                     <aside className="coll-tree">
@@ -289,28 +304,33 @@ export default function LibraryFace({
                                onContext={(e, d) => setMenu({ x: e.clientX, y: e.clientY, doc: d })} />
                     </aside>
                     <div className="coll-main">
-                      <ImportPanel stances={stances} notify={notify} onDone={refreshDocs} />
+                      <ImportPanel stances={stances} notify={notify} onDone={refreshDocs}
+                                   active={active && view === "collection"} />
                     </div>
                   </div>
-                )}
-                {view === "graph" && (
+                </div>
+                <div style={{ display: view === "graph" ? "contents" : "none" }}>
                   <GraphPanel stances={stances} docs={docs} notify={notify}
                               active={active && view === "graph"}
                               onShowDoc={showDossier}
                               onChain={(anchor) => { setChainAnchor(anchor); setView("chain"); }} />
-                )}
-                {view === "chain" && (
+                </div>
+                <div style={{ display: view === "chain" ? "contents" : "none" }}>
                   <ChainView stances={stances} anchor={chainAnchor}
                              setAnchor={setChainAnchor} notify={notify} />
-                )}
-                {view === "timeline" && (
+                </div>
+                <div style={{ display: view === "timeline" ? "contents" : "none" }}>
                   <TimelineView rows={null} docs={docs} notify={notify} />
-                )}
-                {view === "compare" && (
+                </div>
+                <div style={{ display: view === "compare" ? "contents" : "none" }}>
                   <ComparePanel stances={stances} docs={docs}
                                 compareList={compareList} notify={notify}
                                 onShowDoc={showDossier} />
-                )}
+                </div>
+                <div style={{ display: view === "archive" ? "contents" : "none" }}>
+                  <ArchiveView active={active && view === "archive"}
+                               notify={notify} />
+                </div>
               </div>
             </>
           )}
@@ -326,7 +346,12 @@ export default function LibraryFace({
             <div className="dossier-meta">
               <div><span className="muted">立场</span> {stanceLabel(dossier.stance || "")}</div>
               {dossier.author ? <div><span className="muted">作者</span> {String(dossier.author)}</div> : null}
-              {dossier.summary ? <div className="dossier-summary">{String(dossier.summary)}</div> : null}
+              {dossier.summary
+                ? <div className="dossier-summary">{String(dossier.summary)}</div>
+                : <div className="dossier-summary">
+                    <span className="badge warn" title="右键文档选「补生成摘要」">
+                      无摘要 · 离线/无模型时生成</span>
+                  </div>}
               <div className="dossier-actions">
                 <button className="link" onClick={() => setReaderDoc(dossier.doc_id)}>打开原件</button>
                 <button className="link" onClick={() => respondWith(undefined, dossier.stance)}>作为回应立场</button>
@@ -354,6 +379,7 @@ export default function LibraryFace({
               submenu: groups.map((g) => ({ key: String(g.id), label: g.name })) },
             { key: "compare", label: "加入对比" },
             { key: "chain", label: "查看逻辑链" },
+            { key: "resummarize", label: "补生成摘要" },
             { key: "delete", label: "删除文档", danger: true },
           ].map((it) => (
             <div key={it.key} className={"ctx-item" + (it.danger ? " danger" : "")}

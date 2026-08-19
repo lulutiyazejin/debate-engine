@@ -57,29 +57,70 @@ def get_file(doc_id: str):
                         filename=p.name)
 
 
-def _table_view(p: Path, sheet: str, page: int) -> dict:
-    ext = p.suffix.lower()
-    if ext == ".csv":
-        text = _read_text_fallback(p)
-        rows = list(_csv.reader(text.splitlines()))
-        sheets = ["Sheet1"]
-        cur = "Sheet1"
-    else:
+def _open_text_stream(p: Path):
+    """0.1.5 D3：流式打开——先用 64KB 样本定编码，再逐行读不整表进内存。"""
+    for enc in ("utf-8", "gbk", "gb18030"):
         try:
-            import openpyxl
+            with open(p, "r", encoding=enc) as f:
+                f.read(65536)
+            return open(p, "r", encoding=enc, newline="")
+        except UnicodeDecodeError:
+            continue
+    return open(p, "r", encoding="utf-8", errors="replace", newline="")
+
+
+def _table_view(p: Path, sheet: str, page: int) -> dict:
+    """0.1.5 D3：窗口只读——csv 逐行流式跳读；xlsx read_only 按 min/max_row 取页，
+    total 用 max_row / 行计数，10 万行级内存平稳。"""
+    ext = p.suffix.lower()
+    start = max(page, 0) * PAGE_ROWS
+    if ext == ".csv":
+        rows: list[list[str]] = []
+        total = 0
+        with _open_text_stream(p) as f:
+            for i, r in enumerate(_csv.reader(f)):
+                if start <= i < start + PAGE_ROWS:
+                    rows.append([str(c) for c in r])
+                total = i + 1
+        return {"kind": "table", "sheets": ["Sheet1"], "sheet": "Sheet1",
+                "rows": rows, "total_rows": total,
+                "page": page, "page_size": PAGE_ROWS}
+    if ext == ".xls":
+        # 0.1.5 D7：老格式走 xlrd（可选依赖）；缺依赖显式提示另存 .xlsx
+        try:
+            import xlrd
         except ImportError:
-            raise HTTPException(501, "查看 Excel 需要 openpyxl（未安装）；"
-                                     "可用「打开原件」交给系统程序")
-        wb = openpyxl.load_workbook(p, read_only=True, data_only=True)
+            raise HTTPException(501, "查看 .xls 需要 xlrd 组件（未安装）；"
+                                     "可用「打开原件」或另存为 .xlsx")
+        book = xlrd.open_workbook(str(p))
+        sheets = book.sheet_names()
+        cur = sheet if sheet in sheets else sheets[0]
+        ws = book.sheet_by_name(cur)
+        end = min(start + PAGE_ROWS, ws.nrows)
+        rows = [["" if c in (None, "") else str(c) for c in ws.row_values(i)]
+                for i in range(start, end)] if start < ws.nrows else []
+        return {"kind": "table", "sheets": sheets, "sheet": cur,
+                "rows": rows, "total_rows": ws.nrows,
+                "page": page, "page_size": PAGE_ROWS}
+    try:
+        import openpyxl
+    except ImportError:
+        raise HTTPException(501, "查看 Excel 需要 openpyxl（未安装）；"
+                                 "可用「打开原件」交给系统程序")
+    wb = openpyxl.load_workbook(p, read_only=True, data_only=True)
+    try:
         sheets = wb.sheetnames
         cur = sheet if sheet in sheets else sheets[0]
+        ws = wb[cur]
         rows = [["" if c is None else str(c) for c in r]
-                for r in wb[cur].iter_rows(values_only=True)]
+                for r in ws.iter_rows(min_row=start + 1,
+                                      max_row=start + PAGE_ROWS,
+                                      values_only=True)]
+        total = ws.max_row or (start + len(rows))
+    finally:
         wb.close()
-    total = len(rows)
-    start = max(page, 0) * PAGE_ROWS
     return {"kind": "table", "sheets": sheets, "sheet": cur,
-            "rows": rows[start:start + PAGE_ROWS], "total_rows": total,
+            "rows": rows, "total_rows": total,
             "page": page, "page_size": PAGE_ROWS}
 
 
@@ -132,9 +173,6 @@ def view_doc(doc_id: str, sheet: str = "", page: int = 0):
                 "format": "md" if ext != ".txt" else "txt",
                 "content": _read_text_fallback(p)}
     if ext in {".csv", ".xlsx", ".xls"}:
-        if ext == ".xls":
-            raise HTTPException(501, ".xls 老格式请用「打开原件」；"
-                                     "或另存为 .xlsx 后重新导入")
         return {**head, **_table_view(p, sheet, page)}
     if ext == ".docx":
         return {**head, **_docx_view(p)}

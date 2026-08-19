@@ -230,8 +230,41 @@ def parse_docx(path: Path) -> ParsedDocument:
 
 
 # ---------- EXCEL ----------
+def _parse_xls(path: Path) -> ParsedDocument:
+    """0.1.5 D7：.xls 老格式走 xlrd（可选依赖）；缺依赖显式提示另存 .xlsx。"""
+    try:
+        import xlrd
+    except ImportError:
+        raise ValueError("解析 .xls 需要 xlrd 组件（pip install xlrd）；"
+                         "或将文件另存为 .xlsx 后重新导入")
+    book = xlrd.open_workbook(str(path))
+    sections: list[Section] = []
+    for ws in book.sheets():
+        rows: list[str] = []
+        header: list[str] | None = None
+        for i in range(ws.nrows):
+            vals = ["" if v in (None, "") else str(v) for v in ws.row_values(i)]
+            if not any(vals):
+                continue
+            if header is None:
+                header = vals
+                continue
+            pairs = [f"{h}={v}" for h, v in zip(header, vals) if v]
+            if pairs:
+                rows.append("；".join(pairs))
+            if len(rows) >= 500:  # 防超大表
+                break
+        if rows:
+            text = f"表格《{ws.name}》共 {len(rows)} 行数据：\n" + "\n".join(rows)
+            sections.append(Section(ws.name, text, 1))
+    return ParsedDocument(source_type="excel", title=path.stem,
+                          sections=sections or [Section(path.stem, "", 1)])
+
+
 def parse_excel(path: Path) -> ParsedDocument:
     """表格 → 文本行描述（AI 转述在入库 Stage 3 由 LLM 处理，此处先结构化）。"""
+    if path.suffix.lower() == ".xls":
+        return _parse_xls(path)   # D7：openpyxl 不支持老格式
     import openpyxl
     wb = openpyxl.load_workbook(str(path), read_only=True, data_only=True)
     sections: list[Section] = []

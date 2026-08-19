@@ -13,10 +13,11 @@ from pathlib import Path
 from typing import Generator
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import config
 from applog import log_error, new_trace_id
 from engine.argument_parser import detect_fallacies
 from engine.reranker import RetrievalChain
-from models.model_router import ModelRouter, get_router
+from models.model_router import (ModelRouter, SlotFailure, get_router)
 from storage.skill_loader import get_skill_loader
 from storage.sqlite_store import SqliteStore
 
@@ -139,7 +140,8 @@ def build_prompt(argument: str, parsed: dict, citations: list[dict],
                  stance: str, fmt: str, style: str,
                  length: int | None = None,
                  fallacies: list[dict] | None = None,
-                 intent: str = "rebut") -> list[dict]:
+                 intent: str = "rebut",
+                 tier: str = "large") -> list[dict]:
     # 0.1.4 批 3：stance="none" = 不站队评价（stance_free 风格），跳过 skill 注入
     if stance == "none":
         skill = None
@@ -152,11 +154,20 @@ def build_prompt(argument: str, parsed: dict, citations: list[dict],
     styles = get_styles()
     style_prompt = styles.get(style, {}).get("prompt") or style
     it = INTENTS.get(intent, INTENTS["rebut"])
-    sys_prompt += (f"\n\n输出要求：{FORMATS.get(fmt, FORMATS['argument'])}；"
-                   f"风格要点：{style_prompt}。\n"
-                   "引用规则：只能使用下方资料的引用 ID（如 [C1]），"
-                   "严禁编造任何未提供的作者、书名或数据。\n"
-                   "写作自检：你的反驳自身不得犯稻草人、假因果、诉诸情感等逻辑谬误。")
+    if tier == "small":
+        # G1 小档（≤7B 稠密）：短指令+步骤显式，不要求自由推理
+        sys_prompt += (f"\n\n任务步骤：1.读对方论点 2.找薄弱环节 "
+                       f"3.用下方资料写{it['verb']}。\n"
+                       f"输出要求：{FORMATS.get(fmt, FORMATS['argument'])}；"
+                       f"风格：{style_prompt}。\n"
+                       "规则：引用只能写 [C1] 这种资料编号，"
+                       "不要编造作者、书名或数据。")
+    else:
+        sys_prompt += (f"\n\n输出要求：{FORMATS.get(fmt, FORMATS['argument'])}；"
+                       f"风格要点：{style_prompt}。\n"
+                       "引用规则：只能使用下方资料的引用 ID（如 [C1]），"
+                       "严禁编造任何未提供的作者、书名或数据。\n"
+                       "写作自检：你的反驳自身不得犯稻草人、假因果、诉诸情感等逻辑谬误。")
     if it["extra"]:
         sys_prompt += f"\n{it['extra']}"
     if length:
@@ -202,6 +213,20 @@ class RebuttalEngine:
         self.chain = chain or RetrievalChain(sqlite=self.db, router=router)
         self.router = router or get_router()
 
+    def _tier(self, provider_override: str | None = None) -> str:
+        """G1：rebuttal 任务落点为本地小模型（≤7B 稠密）时切小档模板。"""
+        from models.model_matrix import prompt_tier_of
+        name = provider_override
+        if not name:
+            chains = config.effective_task_chains().get("rebuttal", [])
+            name = next((n for n in chains
+                         if n in self.router.providers
+                         and self.router.providers[n].available()), None)
+        if name == "ollama":
+            model = config.effective_provider_models().get("ollama", "")
+            return prompt_tier_of(model)
+        return "large"
+
     def generate(self, argument: str, stance: str, fmt: str = "argument",
                  style: str = "rebuttal",
                  trace_id: str | None = None,
@@ -211,9 +236,13 @@ class RebuttalEngine:
                  mode: str = "hybrid",
                  center: str | None = None,
                  intent: str = "rebut",
-                 materials: list[dict] | None = None) -> dict:
+                 materials: list[dict] | None = None,
+                 provider: str | None = None,
+                 interactive: bool = False) -> dict:
         """完整链路：检索 → 谬误检测 → 组装 → 生成 → 引用验证（失败重试一次）。
-        intent=五意图之三（rebut/critique/evaluate）；materials=素材篮强制引用候选。"""
+        intent=五意图之三（rebut/critique/evaluate）；materials=素材篮强制引用候选；
+        0.1.5 H1：interactive=True 槽失败抛 SlotFailure 交前端动作 toast；
+        provider=用户拍板后重进的指定槽（含 offline）。"""
         if length is not None and (length < 20 or length > MAX_LENGTH):
             raise ValueError(f"字数参数超出范围（20-{MAX_LENGTH}）: {length}")
         trace_id = trace_id or new_trace_id()
@@ -238,10 +267,17 @@ class RebuttalEngine:
                                      trace_id=trace_id) if fallacy else []
         messages = build_prompt(argument, r["parsed_argument"], citations,
                                 stance, fmt, style, length=length,
-                                fallacies=fallacies, intent=intent)
+                                fallacies=fallacies, intent=intent,
+                                tier=self._tier(provider))
 
-        output, provider = self.router.run("rebuttal", messages,
+        if interactive:
+            output, used = self.router.run_interactive(
+                "rebuttal", messages, provider=provider,
+                trace_id=trace_id, max_tokens=2000)
+        else:
+            output, used = self.router.run("rebuttal", messages,
                                            trace_id=trace_id, max_tokens=2000)
+        provider = used
         invalid = validate_citations(output, citations)
         if invalid and provider != "offline":
             # 引用幻觉 → 重试一次，附加警告
@@ -252,9 +288,15 @@ class RebuttalEngine:
             messages.append({"role": "user", "content":
                              f"你使用了不存在的引用 {invalid}，"
                              "请重写，只允许使用提供的引用 ID。"})
-            output, provider = self.router.run("rebuttal", messages,
-                                               trace_id=trace_id,
-                                               max_tokens=2000)
+            if interactive:
+                # 重试钉在刚才成功的槽上，不静默换槽
+                output, provider = self.router.run_interactive(
+                    "rebuttal", messages, provider=provider,
+                    trace_id=trace_id, max_tokens=2000)
+            else:
+                output, provider = self.router.run("rebuttal", messages,
+                                                   trace_id=trace_id,
+                                                   max_tokens=2000)
             invalid = validate_citations(output, citations)
             if invalid:
                 # 仍有幻觉 → 剥除无效引用
@@ -268,6 +310,23 @@ class RebuttalEngine:
         # 反面演示风格：输出头部固定警示（决策 1）
         if get_styles().get(style, {}).get("demo_warning"):
             output = "⚠ 反面演示——这是错误示范\n\n" + output
+
+        # 0.1.5 A1：中立评价存档——evaluate+不站队且生成成功，
+        # 落 archive/中立评价/（frontmatter 含 stance: none，不回落首立场）
+        neutral_archived = ""
+        if (intent == "evaluate" and stance == "none"
+                and output.strip() and provider != "offline"):
+            try:
+                from datetime import date as _date
+
+                from ingestion.archiver import archive_neutral_review
+                head = (argument.strip().splitlines()[0])[:40] or "评价"
+                content = (f"---\ntitle: {head}\nstance: none\n"
+                           f"archived_at: {_date.today().isoformat()}\n---\n\n"
+                           f"# 评价：{argument.strip()[:200]}\n\n{output}")
+                neutral_archived = archive_neutral_review(head, content)
+            except Exception:   # 存档失败不阻断输出
+                neutral_archived = ""
 
         # 字数检查：超目标 ±30% 仅提示不重生成（项目7）
         length_note = None
@@ -284,6 +343,7 @@ class RebuttalEngine:
         return {"trace_id": trace_id, "rebuttal": output,
                 "provider": provider, "stance": stance,
                 "format": fmt, "style": style, "intent": intent,
+                "neutral_archived": bool(neutral_archived),   # A1
                 "parsed_argument": r["parsed_argument"],
                 "detected_fallacies": fallacies,
                 "length_note": length_note,
@@ -304,13 +364,23 @@ class RebuttalEngine:
                         mode: str = "hybrid",
                         center: str | None = None,
                         intent: str = "rebut",
-                        materials: list[dict] | None = None
+                        materials: list[dict] | None = None,
+                        provider: str | None = None,
+                        interactive: bool = False
                         ) -> Generator[dict, None, None]:
-        """SSE 流式：先推送 meta，再分片推送正文，最后推送 citations。"""
-        result = self.generate(argument, stance, fmt, style, trace_id,
-                               length=length, cite_format=cite_format,
-                               fallacy=fallacy, mode=mode, center=center,
-                               intent=intent, materials=materials)
+        """SSE 流式：先推送 meta，再分片推送正文，最后推送 citations；
+        0.1.5 H1：交互槽失败推 slot_failed 事件（不自动降级）。"""
+        try:
+            result = self.generate(argument, stance, fmt, style, trace_id,
+                                   length=length, cite_format=cite_format,
+                                   fallacy=fallacy, mode=mode, center=center,
+                                   intent=intent, materials=materials,
+                                   provider=provider, interactive=interactive)
+        except SlotFailure as sf:
+            yield {"event": "slot_failed",
+                   "data": {"failed": sf.failed, "reason": sf.reason,
+                            "next": sf.next}}
+            return
         yield {"event": "meta",
                "data": {"trace_id": result["trace_id"],
                         "provider": result["provider"],
@@ -325,4 +395,5 @@ class RebuttalEngine:
                         "citations_formatted": result["citations_formatted"],
                         "quality": result["quality"],
                         "length_note": result["length_note"],
+                        "neutral_archived": result["neutral_archived"],  # A1
                         "retrieval_ms": result["retrieval_ms"]}}

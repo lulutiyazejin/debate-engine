@@ -3,6 +3,7 @@ import { useState } from "react";
 import { api } from "../api";
 import type { DocRow } from "../App";
 import Combobox from "../components/Combobox";
+import SegmentedSlider from "../components/SegmentedSlider";
 
 interface Row {
   a_claim: string; a_doc: string; a_thinker?: string;
@@ -72,14 +73,17 @@ export default function ComparePanel({ stances, docs, compareList, notify,
 
   return (
     <div className="panel compare">
+      {/* 0.1.5 J7：对比子 tab 改滑移分段器 */}
+      <div className="seg-row" style={{ padding: 0 }}>
+        <SegmentedSlider value={mode}
+          onChange={(k) => { setMode(k as typeof mode); setRows(null); }}
+          options={[
+            { key: "docs", label: "库内两文档对比" },
+            { key: "texts", label: "粘贴两段文本对比" },
+            { key: "divergence", label: "同立场内部分歧地图" },
+          ]} />
+      </div>
       <div className="controls">
-        <label>模式
-          <select value={mode} onChange={(e) => { setMode(e.target.value as never); setRows(null); }}>
-            <option value="docs">库内两文档对比</option>
-            <option value="texts">粘贴两段文本对比</option>
-            <option value="divergence">同立场内部分歧地图</option>
-          </select>
-        </label>
         {mode === "docs" && (
           <>
             <label>甲方文档

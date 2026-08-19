@@ -166,11 +166,19 @@ def delete_custom_provider(name: str):
     if len(kept) == len(provs):
         raise HTTPException(404, "自定义服务商不存在")
     s = config.load_settings()
-    chains = {t: [n for n in chain if n != name]
-              for t, chain in (s.get("task_chains") or {}).items()}
+    # 0.1.5 H1：曾选它的任务摘除；槽清空时回落内置默认链（前端 toast 告知）
+    affected: list[str] = []
+    chains: dict[str, list[str]] = {}
+    for t, chain in (s.get("task_chains") or {}).items():
+        pruned = [n for n in chain if n != name]
+        if len(pruned) != len(chain):
+            affected.append(t)
+        if not pruned and t in config.TASK_CHAINS:
+            pruned = list(config.TASK_CHAINS[t])
+        chains[t] = pruned
     config.save_settings({"custom_providers": kept, "task_chains": chains})
     reset_router()
-    return {"ok": True}
+    return {"ok": True, "affected_tasks": affected}
 
 
 class ParamsPatch(BaseModel):
@@ -309,17 +317,34 @@ def patch_web_enrich(req: WebEnrichPatch):
 
 @router.get("/config/ollama/status")
 def ollama_status():
-    """探测 Ollama：运行状态 / 已装模型 / 候选清单 / 未装时的指引。"""
+    """探测 Ollama：运行状态 / 已装模型 / 矩阵候选卡（G2）/ 下载通道（F3b）/
+    运行时版本比对（不兼容标升级）/ 硬件推荐徽标（H2）。"""
     from ingestion import ollama_adapter as oa
+    from models import model_matrix as mm
     running = oa.is_installed()
     ok, hint = (True, "Ollama 正在运行") if running else oa.ensure_ollama_started()
     models = oa.models_list() if running else []
     active = config.effective_provider_models().get("ollama", "")
+    version = oa.runtime_version() if running else None
+    hw = config.load_settings().get("hw_profile") or {}
+    rec = hw.get("recommend") or ""
+    cands = []
+    for m in oa.candidates():
+        compat = mm.runtime_ok(m["name"], version)
+        cands.append({
+            "name": m["name"], "label": m["label"],
+            "vram_gb": m["vram_gb"], "window": m["window"],
+            "speed": m["speed"], "quality": m["quality"],
+            "zh": m["zh"], "good_at": m["good_at"],
+            "min_runtime": m["min_runtime"],
+            "compat_ok": compat,
+            "recommended": m["name"] == rec})
     return {"running": running, "hint": hint,
             "installed_models": models or [],
             "active_model": active,
-            "candidates": [{"name": k, "label": v}
-                           for k, v in oa.LOCAL_MODEL_CANDIDATES.items()]}
+            "version": version,
+            "channel": oa.download_channel(),
+            "candidates": cands}
 
 
 class OllamaPull(BaseModel):
@@ -351,7 +376,7 @@ def ollama_pull(req: OllamaPull):
     return StreamingResponse(_stream(), media_type="application/x-ndjson")
 
 
-# ---------- 0.1.4 批 5（决策 3）：任务链编辑（自主选择生效模型） ----------
+# ---------- 0.1.4 批 5（决策 3）：任务链覆盖；0.1.5 H1：编号槽终版 ----------
 
 class TaskChainPatch(BaseModel):
     task: str = Field(min_length=1)
@@ -361,7 +386,7 @@ class TaskChainPatch(BaseModel):
 @router.patch("/config/task-chains")
 def patch_task_chain(req: TaskChainPatch):
     """按任务覆盖优先级链，写 settings.json task_chains 键，热生效。
-    校验：任务存在、服务商存在（内置+自定义）、offline 兜底不许写入链。"""
+    校验：任务存在、服务商存在（内置+自定义）、offline 自动保底不许写入链。"""
     if req.task not in config.TASK_CHAINS:
         raise HTTPException(422, f"未知任务 {req.task}，可选: {list(config.TASK_CHAINS)}")
     known = set(config.PROVIDER_URLS) | {"ollama"} | {
@@ -370,13 +395,27 @@ def patch_task_chain(req: TaskChainPatch):
     if bad:
         raise HTTPException(422, f"未知服务商: {'、'.join(bad)}")
     if "offline" in req.chain:
-        raise HTTPException(422, "offline 是自动兜底，不写入链")
+        raise HTTPException(422, "offline 是自动保底，不写入链")
     s = config.load_settings()
     chains = s.get("task_chains") or {}
     chains[req.task] = req.chain
     config.save_settings({"task_chains": chains})
     reset_router()
     return {"task": req.task, "chain": req.chain}
+
+
+class TaskSlotsPatch(BaseModel):
+    task: str = Field(min_length=1)
+    slots: list[str] = Field(min_length=1, max_length=5)
+
+
+@router.patch("/config/task-slots")
+def patch_task_slots(req: TaskSlotsPatch):
+    """0.1.5 H1：编号槽写入——同链同源（task_chains 键，旧设置天然兼容），
+    额外校验：非空 / 不重复 / 成员存在 / 上限 5 槽。"""
+    if len(set(req.slots)) != len(req.slots):
+        raise HTTPException(422, "槽成员不可重复")
+    return patch_task_chain(TaskChainPatch(task=req.task, chain=req.slots))
 
 
 # ---------- 0.1.4 批 5（决策 2）：数据目录迁移 ----------
@@ -387,9 +426,45 @@ class MigratePost(BaseModel):
 
 @router.get("/config/data-root")
 def get_data_root():
+    """0.1.5 D5：追加旧（默认）目录路径与体积，供回滚引导。"""
+    import os
+    default = Path(os.getenv("KB_PATH",
+                             str(config.PROJECT_ROOT / "knowledge_base")))
+    overridden = config.DATA_ROOT_MARKER.exists()
+    old_size = 0
+    old_ok = False
+    if overridden and default.exists():
+        old_ok = (default / "knowledge.db").exists()
+        try:
+            old_size = sum(p.stat().st_size
+                           for p in default.rglob("*") if p.is_file())
+        except OSError:
+            old_size = 0
     return {"path": str(config.KNOWLEDGE_BASE_PATH),
             "marker": str(config.DATA_ROOT_MARKER),
-            "overridden": config.DATA_ROOT_MARKER.exists()}
+            "overridden": overridden,
+            "old_path": str(default) if overridden else "",
+            "old_size_bytes": old_size,
+            "old_rollback_ok": old_ok}
+
+
+@router.post("/config/data-root/rollback")
+def rollback_data_root():
+    """0.1.5 D5：回滚到旧目录——删 data-root.txt 标记回默认路径；
+    需旧路径 knowledge.db 在；重启生效；迁移后目录保留不删。"""
+    import os
+    if not config.DATA_ROOT_MARKER.exists():
+        raise HTTPException(422, "当前未迁移，无需回滚")
+    default = Path(os.getenv("KB_PATH",
+                             str(config.PROJECT_ROOT / "knowledge_base")))
+    if not (default / "knowledge.db").exists():
+        raise HTTPException(422, f"旧目录无 knowledge.db（{default}），不能回滚")
+    try:
+        config.DATA_ROOT_MARKER.unlink()
+    except OSError as e:
+        raise HTTPException(500, f"回滚失败：{e}")
+    return {"ok": True, "detail": f"已回滚到 {default}，重启软件生效；"
+                                  "迁移后的目录保留未动"}
 
 
 @router.post("/config/data-root/migrate")

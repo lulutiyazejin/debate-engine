@@ -1,6 +1,6 @@
 // 双面骨架（PLAN-0.1.2 项目7/8/9/24 + PLAN-0.1.3 C1/C2/C6）：
 // 无外框窗口：顶部功能条=拖动区（应用标+双面tab+篮角标+设置+自绘窗口控制钮）。
-// 切换通道：功能条 tab / 长按右键滑动(≥120px) / Ctrl+Tab(瞬切) / Ctrl+K 命令面板。
+// 切换通道：功能条 tab / 长按右键滑动(≥120px) / Ctrl+Tab(瞬切)。
 // 设置 = 全屏覆盖浮层（不遮 winctl）；两面常驻挂载不卸载。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -47,7 +47,7 @@ export interface StanceOpt { name: string; label: string; blacklist?: string[] }
 type Face = "library" | "respond";
 
 // ---------- 快捷键（localStorage 可自定义，系统保留键拒绝） ----------
-const DEFAULT_KEYS = { switch: "Ctrl+Tab", settings: "Ctrl+,", palette: "Ctrl+K" };
+const DEFAULT_KEYS = { switch: "Ctrl+Tab", settings: "Ctrl+," };
 export function loadKeys(): typeof DEFAULT_KEYS {
   try {
     return { ...DEFAULT_KEYS, ...JSON.parse(localStorage.getItem("de.keys") || "{}") };
@@ -65,6 +65,7 @@ function matchKey(e: KeyboardEvent, spec: string): boolean {
 
 const GESTURE_MIN = 10;    // 低于此位移放行右键菜单
 const GESTURE_DONE = 120;  // 达到此位移松手完成切换
+const GESTURE_MAX = 240;   // 0.1.5 I5：跟手限幅；达此值一次性触发切换
 
 // ---------- 自绘线型图标（决策7：禁 emoji、禁现成库；1.4px 描边同族） ----------
 const IcoLib = () => (
@@ -79,10 +80,6 @@ const IcoGear = () => (
   <svg width="15" height="15" viewBox="0 0 16 16">
     <circle cx="6" cy="5" r="1.6" /><circle cx="10" cy="11" r="1.6" />
     <path d="M2.5 5h1.9M7.6 5h5.9M2.5 11h5.9M11.6 11h1.9" />
-  </svg>);
-const IcoPalette = () => (
-  <svg width="15" height="15" viewBox="0 0 16 16">
-    <path d="M3.5 4.5l3.5 3.5-3.5 3.5M8.5 11.5H13" />
   </svg>);
 const IcoMin = () => (
   <svg width="12" height="12" viewBox="0 0 16 16"><path d="M3.5 8h9" /></svg>);
@@ -109,13 +106,12 @@ function App() {
   const [instant, setInstant] = useState(false);      // 快捷键=瞬切零动画
   const [dragX, setDragX] = useState<number | null>(null); // 手势跟手位移
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [paletteOpen, setPaletteOpen] = useState(false);
   const [maximized, setMaximized] = useState(false);
   const [tourStep, setTourStep] = useState(() =>
     localStorage.getItem("de.tour") ? -1 : 0);
   const [basketCount, setBasketCount] = useState(0);
   const [basketVersion, setBasketVersion] = useState(0);
-  const [libraryQuery, setLibraryQuery] = useState("");
+  const [libraryQuery] = useState("");
   const [respondPrefill, setRespondPrefill] =
     useState<{ stance?: string; argument?: string }>({});
   const [toast, setToast] = useState("");
@@ -205,11 +201,19 @@ function App() {
       `Debate Engine — ${next === "library" ? "知识库" : "回应"}`).catch(() => {});
   }, []);
 
-  // ---------- 通道 2：长按右键滑动手势 ----------
+  // ---------- 通道 2：长按右键滑动手势（0.1.5 I5：依赖只剩 switchFace，
+  // 拖拽不再每帧重挂监听；限幅 ±240；达限幅一次性触发并交棒过渡动画） ----------
   useEffect(() => {
-    let startX = 0, tracking = false, gesturing = false;
+    let startX = 0, tracking = false, gesturing = false, suppressCtx = false;
     const invert = () => localStorage.getItem("de.gesture.invert") === "1";
     const enabled = () => localStorage.getItem("de.gesture") !== "off";
+    const fire = (dx: number) => {
+      // 一次性触发：立即停追踪，dragX 归零后 transition 接管到目标位
+      tracking = false; gesturing = false; suppressCtx = true;
+      setDragX(null);
+      const goRight = invert() ? dx > 0 : dx < 0;
+      switchFace(goRight ? "respond" : "library");
+    };
     const down = (e: MouseEvent) => {
       if (e.button !== 2 || !enabled()) return;
       startX = e.clientX; tracking = true; gesturing = false;
@@ -218,24 +222,28 @@ function App() {
       if (!tracking) return;
       const dx = e.clientX - startX;
       if (!gesturing && Math.abs(dx) >= GESTURE_MIN) gesturing = true;
-      if (gesturing) setDragX(Math.max(-160, Math.min(160, dx)));
+      if (!gesturing) return;
+      if (Math.abs(dx) >= GESTURE_MAX) { fire(dx); return; }
+      setDragX(Math.max(-GESTURE_MAX, Math.min(GESTURE_MAX, dx)));
     };
     const up = (e: MouseEvent) => {
       if (!tracking) return;
       tracking = false;
       if (!gesturing) return;         // <10px：放行右键菜单
       const dx = e.clientX - startX;
+      gesturing = false; suppressCtx = true;
       setDragX(null);
       if (Math.abs(dx) >= GESTURE_DONE) {
         // 默认向左滑=去右面（回应），可反转
         const goRight = invert() ? dx > 0 : dx < 0;
         switchFace(goRight ? "respond" : "library");
       }
-      gesturing = false;
     };
     const ctx = (e: MouseEvent) => {
-      // 手势位移已越过阈值 → 本次右键菜单抑制（三处业务右键菜单不受影响）
-      if (gesturing || dragX !== null) { e.preventDefault(); e.stopPropagation(); }
+      // 手势已越过阈值 → 本次右键菜单抑制（三处业务右键菜单不受影响）
+      if (gesturing || suppressCtx) {
+        e.preventDefault(); e.stopPropagation(); suppressCtx = false;
+      }
     };
     window.addEventListener("mousedown", down, true);
     window.addEventListener("mousemove", move, true);
@@ -247,16 +255,15 @@ function App() {
       window.removeEventListener("mouseup", up, true);
       window.removeEventListener("contextmenu", ctx, true);
     };
-  }, [switchFace, dragX]);
+  }, [switchFace]);
 
-  // ---------- 通道 3：快捷键（Ctrl+Tab 瞬切 / Ctrl+, 设置 / Ctrl+K 面板） ----------
+  // ---------- 通道 3：快捷键（Ctrl+Tab 瞬切 / Ctrl+, 设置） ----------
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const keys = loadKeys();
       if (matchKey(e, keys.switch)) { e.preventDefault(); switchFace(undefined, true); }
       else if (matchKey(e, keys.settings)) { e.preventDefault(); setSettingsOpen((v) => !v); }
-      else if (matchKey(e, keys.palette)) { e.preventDefault(); setPaletteOpen((v) => !v); }
-      else if (e.key === "Escape") { setSettingsOpen(false); setPaletteOpen(false); }
+      else if (e.key === "Escape") { setSettingsOpen(false); }
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
@@ -266,10 +273,6 @@ function App() {
   const respondWith = useCallback((argument?: string, stance?: string) => {
     setRespondPrefill({ argument, stance });
     switchFace("respond");
-  }, [switchFace]);
-  const searchWith = useCallback((q: string) => {
-    setLibraryQuery(q);
-    switchFace("library");
   }, [switchFace]);
 
   const stanceOpts: StanceOpt[] = useMemo(() => stances.map((s) => ({
@@ -325,10 +328,8 @@ function App() {
           </button>
         </nav>
         <span className="caps" data-tauri-drag-region>
-          {loadKeys().switch} 切面 · {loadKeys().palette} 面板</span>
+          {loadKeys().switch} 切面</span>
         <div className="spacer" data-tauri-drag-region />
-        <button className="tb-btn" title={`命令面板（${loadKeys().palette}）`}
-                onClick={() => setPaletteOpen(true)}><IcoPalette /></button>
         <button className="tb-btn" title={`设置（${loadKeys().settings}）`}
                 onClick={() => setSettingsOpen(true)}><IcoGear /></button>
         <div className="winctl">
@@ -367,21 +368,15 @@ function App() {
             <div className="overlay-head">
               <span>设置</span>
               <button className="link" title="关闭 (Esc)" onClick={() => setSettingsOpen(false)}>
+                {/* 0.1.5 E6：退出箭头入族——开放描边不闭合（去 z），round cap 同 1.4 描边族 */}
                 <svg width="14" height="14" viewBox="0 0 16 16">
-                  <path d="M2 8h12 M10 5l4 3-4 3z" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                  <path d="M2.5 8h11 M10 4.5l4 3.5-4 3.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               </button>
             </div>
             <SettingsPanel notify={notify} />
           </div>
         </div>
-      )}
-
-      {/* Ctrl+K 命令面板（永不可禁用） */}
-      {paletteOpen && (
-        <Palette close={() => setPaletteOpen(false)} switchFace={switchFace}
-                 openSettings={() => setSettingsOpen(true)}
-                 searchWith={searchWith} respondWith={respondWith} />
       )}
 
       {/* 首启三步导览 */}
@@ -397,15 +392,27 @@ function App() {
               <p>窗口外框已收进这条功能条：拖空白处移动窗口、双击最大化。点「知识库 / 回应」切面；也可以 <b>{loadKeys().switch}</b> 瞬切，或按住右键左右滑动。</p>
             </>}
             {tourStep === 2 && <>
+              <h3>回答合一</h3>
+              <p>回应面一个输入框搞定全部：选风格（反驳 / 批判 / 评价等 14 种笔法）即切意图，评价不站队全库平权检索，生成带真实引用。</p>
+            </>}
+            {tourStep === 3 && <>
+              <h3>素材组</h3>
+              <p>知识库面检索到的段落 / 论点可右键加入素材组；回应面左侧勾选后作为必引用材料注入生成。</p>
+            </>}
+            {tourStep === 4 && <>
+              <h3>组件中心</h3>
+              <p>设置→组件中心可按需下载语义向量 / OCR / 解析增强包；本地模型分区能按显卡推荐并一键下载 Ollama 模型。</p>
+            </>}
+            {tourStep === 5 && <>
               <h3>回应面</h3>
-              <p>输入对方言论，选择风格（反驳 / 批判性分析 / 评价等 14 种笔法）生成带引用的回答。知识库面收集的素材进左侧素材组，勾选注入生成。</p>
+              <p>输入对方言论，选择风格生成带引用的回答。开始使用吧！</p>
             </>}
             <div className="tour-nav">
-              <span className="muted">{tourStep + 1} / 3</span>
+              <span className="muted">{tourStep + 1} / 6</span>
               <button className="primary" onClick={() => {
-                if (tourStep >= 2) { localStorage.setItem("de.tour", "1"); setTourStep(-1); }
+                if (tourStep >= 5) { localStorage.setItem("de.tour", "1"); setTourStep(-1); }
                 else setTourStep(tourStep + 1);
-              }}>{tourStep >= 2 ? "开始使用" : "下一步"}</button>
+              }}>{tourStep >= 5 ? "开始使用" : "下一步"}</button>
             </div>
           </div>
         </div>
@@ -416,46 +423,6 @@ function App() {
   );
 }
 
-// ---------- 命令面板 ----------
-function Palette({ close, switchFace, openSettings, searchWith, respondWith }: {
-  close: () => void;
-  switchFace: (f?: Face, k?: boolean) => void;
-  openSettings: () => void;
-  searchWith: (q: string) => void;
-  respondWith: (argument?: string) => void;
-}) {
-  const [q, setQ] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => { inputRef.current?.focus(); }, []);
-  const cmds = [
-    { key: "lib", label: "切到：知识库面", run: () => switchFace("library", true) },
-    { key: "resp", label: "切到：回应面", run: () => switchFace("respond", true) },
-    { key: "search", label: q ? `搜索：「${q}」` : "全局搜索…（输入关键词）",
-      run: () => q && searchWith(q) },
-    { key: "rebut", label: q ? `回应：「${q}」` : "发起回应…（输入对方论点）",
-      run: () => q && respondWith(q) },
-    { key: "settings", label: "打开设置", run: openSettings },
-  ];
-  const visible = cmds.filter((c) => !q || c.label.includes(q) ||
-                              c.key === "search" || c.key === "rebut");
-  return (
-    <div className="overlay" onClick={close}>
-      <div className="palette" onClick={(e) => e.stopPropagation()}>
-        <input ref={inputRef} value={q} placeholder="输入命令、搜索词或对方论点…"
-               onChange={(e) => setQ(e.target.value)}
-               onKeyDown={(e) => {
-                 if (e.key === "Enter" && visible[0]) { visible[0].run(); close(); }
-                 if (e.key === "Escape") close();
-               }} />
-        <div className="palette-list">
-          {visible.map((c) => (
-            <div key={c.key} className="palette-item"
-                 onClick={() => { c.run(); close(); }}>{c.label}</div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
+// ---------- 命令面板：0.1.5 I4 整删（方案 B） ----------
 
 export default App;

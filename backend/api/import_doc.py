@@ -19,8 +19,8 @@ from ingestion.web_enrich import enrich, enrichment_enabled
 
 router = APIRouter(prefix="/api", tags=["import"])
 
-# 批量导入状态（单机单队列，供进度端点轮询）
-BATCH_STATE: dict = {"running": False, "items": []}
+# 批量导入状态（单机单队列，供进度端点轮询；0.1.5 I1 加 cancel 标志）
+BATCH_STATE: dict = {"running": False, "items": [], "cancel": False}
 
 
 class ImportRequest(BaseModel):
@@ -37,6 +37,11 @@ class ConfirmRequest(BaseModel):
     # 0.1.4 批 6：归档三选（缺省读 settings archive_policy）+「记住选择」
     archive: str | None = Field(default=None, pattern="^(copy|move|none)$")
     remember: bool = False
+    # 0.1.5 F5：超墙三选——map_reduce=分章（预览已跑不重跑）；
+    # full=换大窗/仍投喂（confirm 时重跑整书总结）
+    over_window: str | None = Field(default=None,
+                                    pattern="^(map_reduce|full)$")
+    remember_over_window: bool = False
 
 
 class BatchRequest(BaseModel):
@@ -67,6 +72,8 @@ def import_confirm(req: ConfirmRequest):
     """Stage 7-10：用户确认立场后完成入库（含查重处置 + 归档三选）。"""
     if req.remember and req.archive:
         config.save_settings({"archive_policy": req.archive})
+    if req.remember_over_window and req.over_window:
+        config.save_settings({"over_window_policy": req.over_window})
     pv = PENDING.get(req.doc_id)
     if pv is None:
         raise HTTPException(404,
@@ -79,12 +86,24 @@ def import_confirm(req: ConfirmRequest):
                 pv = idx.preview(pv.source)   # exact 预览短路过，补跑完整分析
         elif pv.duplicate["type"] == "exact":
             raise HTTPException(409, "完全重复文档，on_duplicate=replace 才能重新入库")
+    if req.over_window == "full":
+        # F5：换大窗/仍投喂——整书重跑总结（路由链自然落云端大窗）
+        from ingestion.summarizer import summarize_full_context
+        try:
+            new_sum = summarize_full_context(pv.parsed.full_text,
+                                             trace_id=pv.trace_id)
+            if new_sum:
+                pv.doc_summary = new_sum
+        except Exception:   # 重跑失败保留预览摘要，不阻断入库
+            pass
     return idx.confirm(pv, req.stance, archive=req.archive)
 
 
 def _run_batch(req: BatchRequest) -> None:
     idx = get_indexer()
     for item in BATCH_STATE["items"]:
+        if BATCH_STATE.get("cancel"):   # 0.1.5 I1：取消后剩余 pending 已标「已取消」
+            break
         if item["status"] != "pending":
             continue   # 不支持格式已标 skipped
         item["status"] = "running"
@@ -96,6 +115,12 @@ def _run_batch(req: BatchRequest) -> None:
                 item["status"], item["detail"] = "skipped", r["skipped"]
             else:
                 item["status"], item["detail"] = "success", r["doc_id"]
+                # 0.1.5 H1：批量静默降级，报告逐本标实际落点
+                try:
+                    from ingestion.summarizer import summary_window
+                    item["via"] = summary_window()[1]
+                except Exception:
+                    item["via"] = ""
         except Exception as exc:   # 逐文件隔离：单个失败不中断队列
             item["status"], item["detail"] = "failed", str(exc)
     BATCH_STATE["running"] = False
@@ -114,8 +139,23 @@ def import_batch(req: BatchRequest, background_tasks: BackgroundTasks):
         + [{"source": s, "status": "skipped", "detail": "不支持的格式"}
            for s in unsupported])
     BATCH_STATE["running"] = True
+    BATCH_STATE["cancel"] = False
     background_tasks.add_task(_run_batch, req)
     return {"accepted": len(sources), "unsupported": len(unsupported)}
+
+
+@router.post("/import/cancel")
+def import_cancel():
+    """0.1.5 I1：取消批量导入——pending 项标「已取消」，当前正在跑的项跑完即止。"""
+    if not BATCH_STATE.get("running"):
+        return {"cancelled": 0}
+    BATCH_STATE["cancel"] = True
+    n = 0
+    for item in BATCH_STATE["items"]:
+        if item["status"] == "pending":
+            item["status"], item["detail"] = "cancelled", "已取消"
+            n += 1
+    return {"cancelled": n}
 
 
 @router.get("/import/progress")
@@ -123,7 +163,7 @@ def import_progress():
     """批量导入进度：队列各文件状态（pending/running/success/skipped/failed）。"""
     items = BATCH_STATE["items"]
     done = sum(1 for i in items
-               if i["status"] in ("success", "skipped", "failed"))
+               if i["status"] in ("success", "skipped", "failed", "cancelled"))
     return {"running": BATCH_STATE["running"], "total": len(items),
             "done": done, "items": items}
 

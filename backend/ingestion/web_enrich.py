@@ -34,6 +34,10 @@ _SCHOOLS = [
 _YEARS_RE = re.compile(r"(1[0-9]{3}|20[0-2][0-9])\s*[年]?\s*[-–—~至]\s*"
                        r"(1[0-9]{3}|20[0-2][0-9]|今|至今)?")
 
+# 0.1.5 A3：版次补抓（中文「第N版」/ 英文 Nth edition）
+_EDITION_RE = re.compile(
+    r"(第\s*[一二三四五六七八九十百0-9]+\s*版|\b\d+(?:st|nd|rd|th)\s+edition)", re.I)
+
 
 def _get(url: str) -> httpx.Response:
     """带代理三态 + SSL 降级的 GET（3 秒超时）。"""
@@ -50,12 +54,15 @@ def _get(url: str) -> httpx.Response:
 
 
 def _extract_fields(text: str) -> dict:
-    """从摘要文本抽 生卒年/学派（正则 + 关键词，抽不到留空）。"""
+    """从摘要文本抽 生卒年/学派/版次（正则 + 关键词，抽不到留空）。"""
     out: dict = {}
     m = _YEARS_RE.search(text)
     if m:
         end = m.group(2) or ""
         out["author_years"] = f"{m.group(1)}–{end}".rstrip("–")
+    me = _EDITION_RE.search(text)   # A3：edition 进联网补抓
+    if me:
+        out["edition"] = me.group(1).replace(" ", "")
     for s in _SCHOOLS:
         if s in text:
             out["school"] = s
