@@ -38,10 +38,16 @@ try {
 }
 "release id: $($rel.id)"
 
-# 4. 上传安装包 asset（同名旧 asset 先删）
+# 4. 上传安装包 asset（同名旧 asset 先删；curl + 禁用 Expect:100-continue——
+#    本机代理会吞掉 100-continue 的终响应，导致 asset 卡 starter 态）
 $name = Split-Path $asset -Leaf
 $old = (Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/$($rel.id)/assets" -Headers $H) | Where-Object { $_.name -eq $name }
 if ($old) { Invoke-RestMethod -Method Delete -Uri "https://api.github.com/repos/$repo/releases/assets/$($old.id)" -Headers $H | Out-Null }
 $up = "https://uploads.github.com/repos/$repo/releases/$($rel.id)/assets?name=$name"
-$r = Invoke-RestMethod -Method Post -Uri $up -Headers $H -ContentType "application/octet-stream" -InFile $asset
-"asset uploaded: $($r.browser_download_url)"
+$proxyArgs = @(); if ($env:HTTPS_PROXY) { $proxyArgs = @("-x", $env:HTTPS_PROXY) }
+curl.exe -s --http1.1 @proxyArgs --connect-timeout 20 --max-time 1600 `
+  -X POST -H "Authorization: Bearer $token" -H "Content-Type: application/octet-stream" `
+  -H "Expect:" --data-binary "@$asset" -w "upload http=%{http_code}`n" -o "$env:TEMP\gh-asset.json" $up
+$state = (Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/$($rel.id)/assets" -Headers $H) | Where-Object { $_.name -eq $name }
+if ($state.state -ne "uploaded") { Write-Error "asset state=$($state.state), not uploaded"; exit 1 }
+"asset uploaded: $($state.browser_download_url)"
