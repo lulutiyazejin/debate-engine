@@ -34,6 +34,33 @@ def reassign_stance(doc_id: str, req: StanceRequest):
         raise HTTPException(404, str(e))
 
 
+class MetadataPatch(BaseModel):
+    """0.1.3 B5：元数据字段级编辑（右键修改）。全部可空 = 只传要改的。"""
+    title: str | None = None
+    author: str | None = None
+    year: int | None = None
+    translator: str | None = None
+    publisher: str | None = None
+    edition: str | None = None
+    original_title: str | None = None
+    original_lang: str | None = None
+    author_years: str | None = None
+    school: str | None = None
+
+
+@router.patch("/docs/{doc_id}/metadata")
+def patch_metadata(doc_id: str, req: MetadataPatch):
+    """元数据编辑：改过的字段记入 manual_fields，联网补充永不覆盖
+    （决策10：手动 > 正文 > 文件名 > 网上）。"""
+    fields = {k: v for k, v in req.model_dump().items() if v is not None}
+    if not fields:
+        raise HTTPException(422, "没有要修改的字段")
+    if not get_db().update_document_fields(doc_id, fields):
+        raise HTTPException(404, f"文档不存在: {doc_id}")
+    return {"doc_id": doc_id, "updated": sorted(fields),
+            "document": get_db().get_document(doc_id)}
+
+
 @router.get("/docs/{doc_id}/preview")
 def preview_doc(doc_id: str):
     """标准化 .md 预览（项目12 知识库面板消费）。"""

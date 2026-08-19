@@ -103,4 +103,29 @@
 ### 批 A（预置）
 - 12 立场 skill 落盘 knowledge_base/skills/stances/，格式同 liberal.skill.md 六节结构；fascist 带红队限定与历史注记红线
 
-（批 B–E 执行时追加）
+### 批 B（后端，两段完成）
+- B1-B4/B6-B7/B10 前段已随 50216f8 落库（schema、citations、web_enrich、config 代理三态、ollama_adapter、bump 脚本）
+- B5 `api/knowledge.py`：MetadataPatch + PATCH /docs/{id}/metadata（手动>正文>文件名>网上，manual_fields 累积）
+- B6 `api/settings.py`：GET/PATCH /config/proxy（custom 前缀校验 + reset_router）、GET/PATCH /config/web-enrich
+- B7 `api/settings.py` + `ingestion/ollama_adapter.py`：/config/ollama/status、/config/ollama/pull NDJSON 流（pull_stream 生成器重写，完成即写 provider_models 热生效）
+- B8 `api/stances.py` 重写：validate_stance_md 六节校验（ASCII id [A-Za-z0-9_]+、注入检测）、POST import（写盘→热载→不可解析回滚）、DELETE（17 预置保护）、GET template
+- B9 `api/diagnostics.py`：GET /diagnostics/connectivity 四查（模型链/维基/百科/代理），SSL 降级重试
+
+### 批 C（前端骨架）
+- C1/C2 `tauri.conf.json` decorations:false+shadow、`capabilities/default.json` +9 窗口权限；`App.tsx` 重写：topbar 拖动区 + face-tabs（篮角标）+ 自绘 1.4px 线型图标（禁 emoji）+ winctl（关钮 hover 唯一红点）+ 双击最大化；悬浮组 JSX/CSS 删除
+- C4 `ImportPanel.tsx`：确认屏 meta-grid 八字段可编辑（联网字段带「网」标）、web_enrich 报告展示、确认后 PATCH metadata 落库；doc_type→source_type 修正
+- C5 `SettingsPanel.tsx`：新增 本地模型（状态/一键 pull 进度条）、网络与代理（三态+联网补充开关+连通自测表）、立场管理（清单/删除/模板/导入校验）、软件信息（版本经 /api/health）四分区；界面区 +窗口记忆开关、悬浮组开关删除
+- C6 `App.tsx`：窗口记忆（localStorage de.winmem/de.winrect，PhysicalPosition/Size 恢复，onMoved/onResized 500ms 去抖保存）
+
+### 批 D（视觉 v5）
+- D1 `tokens.css` 皮肤置换：纸感双色板（深 #131313 墨纸 / 浅 #e8e6e1 纸灰）、--sans/--mono、--ease cubic-bezier(.16,1,.3,1)、--topbar-h；token 名不变零消费方破坏
+- D2/D10 `styles.css`：topbar/tb-btn/winctl 发丝线控件、--ease 统一、breath 呼吸点（唯一持续动效）
+- D4 `ChainView.tsx` 重写：垂直流程图 chain-flow（TOP→BOTTOM=TIME 提示、rel-chip 关系标、图例、节点点击续锚）
+- D6 `styles.css`：confirm-card 纸叠层阴影
+- D11 `packaging/make_icon.py`：四书堆纸感图标（Pillow 自绘）→ icon.ico/png 全尺寸覆盖
+- D12 `main.py` /fonts 静态挂载 + /api/fonts；`theme.ts` initExternalFonts FontFace 注册（knowledge_base/fonts 即放即用）
+- D3 记债：图谱保留 ForceGraph2D（已吃 token 色板），G6 迁移入 0.1.4 评估
+
+### 批 E（验收）
+- E1 pytest 76 全绿（test_v013.py 12 例：元数据回环/立场校验/代理三态本机直连/ollama 不可达上报/联网开关）；tsc --noEmit 零错误；vite build 通过
+

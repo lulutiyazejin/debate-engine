@@ -19,8 +19,10 @@
         "minHeight": 600,
         "center": true,
         "dragDropEnabled": true,
+        "decorations": false,
+        "shadow": true,
         "theme": "Dark",
-        "backgroundColor": "#101216"
+        "backgroundColor": "#131313"
       }
     ],
     "security": {

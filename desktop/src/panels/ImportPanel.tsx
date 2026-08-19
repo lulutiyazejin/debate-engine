@@ -15,11 +15,14 @@ interface Preview {
   doc_id: string;
   title?: string;
   author?: string;
-  doc_type?: string;
+  year?: number;
+  source_type?: string;
   doc_summary?: string;
   token_estimate?: number;
   classification?: { stance?: string; confidence?: number; reason?: string };
   duplicate?: { type: string; existing_doc_id: string } | null;
+  enriched?: string;
+  web_enrich?: { fields: Record<string, string>; source: string; reports: string[] };
 }
 
 interface BatchItem { source: string; status: string; detail: string | null }
@@ -28,6 +31,7 @@ export default function ImportPanel({ stances, notify, onDone }: Props) {
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState("");
   const [preview, setPreview] = useState<Preview | null>(null);
+  const [meta, setMeta] = useState<Record<string, string>>({});
   const [chosenStance, setChosenStance] = useState("");
   const [onDup, setOnDup] = useState("keep-both");
   const [strategy, setStrategy] = useState("auto");
@@ -82,6 +86,15 @@ export default function ImportPanel({ stances, notify, onDone }: Props) {
         { source, summary_strategy: strategy });
       setPreview(pv);
       setChosenStance(pv.classification?.stance || stances[0]?.name || "");
+      // C4：正文/文件名提取值 + 联网补充值 预填确认屏（只补空，来源可辨）
+      const wf = pv.web_enrich?.fields || {};
+      setMeta({
+        title: pv.title || "", author: pv.author || wf.author || "",
+        year: pv.year ? String(pv.year) : (wf.year || ""),
+        translator: wf.translator || "", publisher: wf.publisher || "",
+        school: wf.school || "", author_years: wf.author_years || "",
+        edition: wf.edition || "",
+      });
     } catch (e) {
       if (String(e).includes("文件夹")) {
         // 拖进来的是目录 → 改走批量接口（服务端递归展开）
@@ -101,6 +114,18 @@ export default function ImportPanel({ stances, notify, onDone }: Props) {
       await api.post("/api/import/confirm", {
         doc_id: preview.doc_id, stance: chosenStance, on_duplicate: onDup,
       });
+      // C4/B5：确认屏上编辑过的字段落库（记入 manual_fields，手动永久优先）
+      const patch: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(meta)) {
+        const t = v.trim();
+        if (!t) continue;
+        if (k === "year") { const n = Number(t); if (n) patch[k] = n; }
+        else patch[k] = t;
+      }
+      if (Object.keys(patch).length) {
+        await api.patch(`/api/knowledge/docs/${preview.doc_id}/metadata`, patch)
+          .catch((e) => notify(`元数据保存失败: ${e}`));
+      }
       notify("入库完成");
       setPreview(null);
       onDone();
@@ -188,10 +213,10 @@ export default function ImportPanel({ stances, notify, onDone }: Props) {
 
       {preview && (
         <div className="confirm-card">
-          <h3>{preview.title || "未命名文档"}</h3>
+          <h3>{meta.title || preview.title || "未命名文档"}</h3>
           <div className="muted small">
-            {preview.author && `作者：${preview.author} · `}
-            类型：{preview.doc_type || "?"} · 约 {preview.token_estimate ?? "?"} tokens
+            类型：{preview.source_type || "?"} · 约 {preview.token_estimate ?? "?"} tokens
+            {preview.web_enrich?.source && ` · 联网核对来源：${preview.web_enrich.source}`}
           </div>
           {preview.duplicate && (
             <div className="demo-warn">
@@ -202,6 +227,23 @@ export default function ImportPanel({ stances, notify, onDone }: Props) {
             </div>
           )}
           <p className="summary">{preview.doc_summary || "（无摘要）"}</p>
+          <div className="meta-grid">
+            {([["title", "书名 / 标题"], ["author", "作者"], ["translator", "译者"],
+               ["publisher", "出版社"], ["year", "年份"], ["school", "流派"],
+               ["author_years", "作者生卒"], ["edition", "版次"]] as const).map(([k, l]) => (
+              <label key={k} className="meta-field">
+                <span>{l}{preview.web_enrich?.fields?.[k] &&
+                  <em className="enrich-tag">网</em>}</span>
+                <input value={meta[k] ?? ""}
+                       onChange={(e) => setMeta({ ...meta, [k]: e.target.value })} />
+              </label>
+            ))}
+          </div>
+          <p className="muted small">
+            字段可直接修改；手动修改的字段永久优先（手动 &gt; 正文 &gt; 文件名 &gt; 网上）。
+            {(preview.web_enrich?.reports?.length ?? 0) > 0 &&
+              ` 联网核对：${preview.web_enrich!.reports.join("；")}`}
+          </p>
           <div className="infer">
             AI 推断立场：<b>{stanceLabel(preview.classification?.stance)}</b>
             （置信度 {((preview.classification?.confidence ?? 0) * 100).toFixed(0)}%）

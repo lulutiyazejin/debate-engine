@@ -262,3 +262,90 @@ def model_override(req: ModelOverride):
     config.save_settings({"provider_models": overrides})
     reset_router()
     return {"provider": req.provider, "model": req.model}
+
+
+# ---------- 0.1.3 B6：代理三态（不开/系统/自定义，本地永远 bypass） ----------
+
+class ProxyPatch(BaseModel):
+    mode: str = Field(pattern="^(off|system|custom)$")
+    url: str = Field(default="", max_length=300)
+
+
+@router.get("/config/proxy")
+def get_proxy():
+    return config.proxy_config()
+
+
+@router.patch("/config/proxy")
+def patch_proxy(req: ProxyPatch):
+    """写 settings.json 的 proxy 键，全部外发请求（模型/维基/百科）即时生效。"""
+    if req.mode == "custom" and not req.url.startswith(("http://", "https://",
+                                                        "socks5://")):
+        raise HTTPException(422, "自定义代理地址须以 http(s):// 或 socks5:// 开头")
+    config.save_settings({"proxy": {"mode": req.mode, "url": req.url}})
+    reset_router()   # 服务商健康探测缓存基于旧网络路径，重建
+    return config.proxy_config()
+
+
+# ---------- 0.1.3 决策10：联网补充开关（默认开） ----------
+
+class WebEnrichPatch(BaseModel):
+    enabled: bool
+
+
+@router.get("/config/web-enrich")
+def get_web_enrich():
+    from ingestion.web_enrich import enrichment_enabled
+    return {"enabled": enrichment_enabled()}
+
+
+@router.patch("/config/web-enrich")
+def patch_web_enrich(req: WebEnrichPatch):
+    config.save_settings({"web_enrich": req.enabled})
+    return {"enabled": req.enabled}
+
+
+# ---------- 0.1.3 B7：本地模型一键（Ollama） ----------
+
+@router.get("/config/ollama/status")
+def ollama_status():
+    """探测 Ollama：运行状态 / 已装模型 / 候选清单 / 未装时的指引。"""
+    from ingestion import ollama_adapter as oa
+    running = oa.is_installed()
+    ok, hint = (True, "Ollama 正在运行") if running else oa.ensure_ollama_started()
+    models = oa.models_list() if running else []
+    active = config.effective_provider_models().get("ollama", "")
+    return {"running": running, "hint": hint,
+            "installed_models": models or [],
+            "active_model": active,
+            "candidates": [{"name": k, "label": v}
+                           for k, v in oa.LOCAL_MODEL_CANDIDATES.items()]}
+
+
+class OllamaPull(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+
+
+@router.post("/config/ollama/pull")
+def ollama_pull(req: OllamaPull):
+    """一键 pull：NDJSON 流式进度；完成即写 provider_models 热生效
+    （决策13：下载立即生效，零手工配置）。"""
+    from fastapi.responses import StreamingResponse
+    from ingestion import ollama_adapter as oa
+
+    def _stream():
+        import json as _json
+        final = {"done": False, "ok": False, "detail": ""}
+        for evt in oa.pull_stream(req.name):
+            if evt.get("done"):
+                final = evt
+                break
+            yield _json.dumps(evt, ensure_ascii=False) + "\n"
+        if final.get("ok"):
+            overrides = config.load_settings().get("provider_models") or {}
+            overrides["ollama"] = req.name
+            config.save_settings({"provider_models": overrides})
+            reset_router()   # 任务落点表 10 秒内可见新模型（验收红线6）
+        yield _json.dumps(final, ensure_ascii=False) + "\n"
+
+    return StreamingResponse(_stream(), media_type="application/x-ndjson")

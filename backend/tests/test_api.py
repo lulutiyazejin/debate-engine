@@ -39,7 +39,7 @@ class TestApi:
         assert r.status_code == 200
         body = r.json()
         assert body["status"] == "ok"
-        assert body["skills"]["stances"] == 5
+        assert body["skills"]["stances"] == 17
 
     def test_stances(self, client):
         r = client.get("/api/stances")

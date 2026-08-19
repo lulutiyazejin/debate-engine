@@ -40,3 +40,25 @@ export async function setThemePref(pref: ThemePref): Promise<void> {
 export async function initTheme(): Promise<void> {
   await setThemePref(getThemePref());
 }
+
+/** D12 字体外挂：knowledge_base/fonts 下的字体文件注册为正文首选。
+ *  引擎就绪后调用（需要 engineBase 已握手）。无字体 = 静默走系统字体栈。 */
+export async function initExternalFonts(base: string): Promise<void> {
+  try {
+    const r = await fetch(`${base}/api/fonts`);
+    const { fonts } = (await r.json()) as { fonts: string[] };
+    if (!fonts?.length) return;
+    const families: string[] = [];
+    for (const f of fonts) {
+      const fam = f.replace(/\.[^.]+$/, "");
+      const face = new FontFace(fam, `url("${base}/fonts/${encodeURIComponent(f)}")`);
+      await face.load();
+      document.fonts.add(face);
+      families.push(`"${fam}"`);
+    }
+    const cur = getComputedStyle(document.documentElement)
+      .getPropertyValue("--sans");
+    document.documentElement.style.setProperty(
+      "--sans", `${families.join(", ")}, ${cur}`);
+  } catch { /* 字体加载失败不影响主流程 */ }
+}

@@ -51,12 +51,10 @@ export default function ChainView({ stances, anchor, setAnchor, notify }: Props)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anchor]);
 
-  // 相邻节点间的关系标签（无直接边 = 灰色弱链）
-  const relBetween = (a: string, b: string): string | null => {
-    const l = links.find((x) =>
-      (x.source === a && x.target === b) || (x.source === b && x.target === a));
-    return l ? REL_LABEL[l.relation] || l.relation : null;
-  };
+  // 相邻节点间的关系（无直接边 = 弱链「先后」）
+  const relKey = (a: string, b: string): string | undefined =>
+    links.find((x) =>
+      (x.source === a && x.target === b) || (x.source === b && x.target === a))?.relation;
 
   return (
     <div className="chain-view">
@@ -89,29 +87,37 @@ export default function ChainView({ stances, anchor, setAnchor, notify }: Props)
       )}
 
       {nodes.length > 0 && (
-        <div className="chain-track">
-          {nodes.map((n, i) => (
-            <div key={n.id} className="chain-step"
-                 style={{ animationDelay: `${i * 40}ms` }}>
-              {i > 0 && (
-                <div className="chain-edge">
-                  <span className={"rel-chip rel-" +
-                    (links.find((l) =>
-                      (l.source === nodes[i - 1].id && l.target === n.id) ||
-                      (l.source === n.id && l.target === nodes[i - 1].id))?.relation || "none")}>
-                    {relBetween(nodes[i - 1].id, n.id) || "→"}
-                  </span>
-                </div>
-              )}
-              <div className="chain-card">
-                <div className="chain-year">{n.year ?? "年代不详"}</div>
-                <div className="chain-claim">{n.claim}</div>
-                <div className="chain-src muted">
-                  {n.thinker || "—"} · {n.doc_title || n.doc_id}
+        <div className="chain-flow">
+          <div className="chain-col">
+            <div className="chain-hint">top → bottom = time</div>
+            {nodes.map((n, i) => (
+              <div key={n.id}>
+                {i > 0 && (
+                  <div className="chain-link">
+                    <span className="cl-line" />
+                    <span className={"rel-chip rel-" +
+                      (relKey(nodes[i - 1].id, n.id) || "none")}>
+                      {REL_LABEL[relKey(nodes[i - 1].id, n.id) || ""] || "先后"}
+                    </span>
+                    <span className="cl-line" />
+                    <span className="cl-head">▾</span>
+                  </div>
+                )}
+                <div className="chain-node" style={{ animationDelay: `${i * 40}ms` }}
+                     title="点击以此主张为锚点继续追" 
+                     onClick={() => setAnchor(n.claim)}>
+                  <div className="cn-src">{n.year ?? "年代不详"} · {n.thinker || "—"}</div>
+                  <div className="cn-claim">{n.claim}</div>
+                  <div className="cn-src">{n.doc_title || n.doc_id}</div>
                 </div>
               </div>
+            ))}
+            <div className="chain-legend">
+              {Object.entries(REL_LABEL).map(([k, v]) => (
+                <span key={k} className={"rel-chip rel-" + k}>{v}</span>
+              ))}
             </div>
-          ))}
+          </div>
         </div>
       )}
     </div>

@@ -45,6 +45,20 @@ app.include_router(stances.router)
 app.include_router(diagnostics.router)
 app.include_router(workspace.router)
 
+# 0.1.3 D12：字体外挂——knowledge_base/fonts 放 ttf/otf/woff2 即放即用，
+# 不随安装包分发字体（体积红线），前端启动时注册 FontFace。
+_FONTS_DIR = config.KNOWLEDGE_BASE_PATH / "fonts"
+_FONTS_DIR.mkdir(parents=True, exist_ok=True)
+from fastapi.staticfiles import StaticFiles  # noqa: E402
+app.mount("/fonts", StaticFiles(directory=str(_FONTS_DIR)), name="fonts")
+
+
+@app.get("/api/fonts")
+def list_fonts():
+    exts = {".ttf", ".otf", ".woff", ".woff2"}
+    return {"fonts": sorted(f.name for f in _FONTS_DIR.iterdir()
+                            if f.is_file() and f.suffix.lower() in exts)}
+
 
 @app.post("/api/shutdown")
 def shutdown():

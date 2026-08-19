@@ -1,13 +1,15 @@
-// 双面骨架（PLAN-0.1.2 项目7/8/9/24）：知识库面 ⇄ 回应面，全屏互斥。
-// 切换四通道：右上悬浮组 / 长按右键滑动(≥120px) / Ctrl+Tab(瞬切) / Ctrl+K 命令面板。
-// 设置 = 全屏覆盖浮层（不是第三个面）；两面常驻挂载不卸载。
+// 双面骨架（PLAN-0.1.2 项目7/8/9/24 + PLAN-0.1.3 C1/C2/C6）：
+// 无外框窗口：顶部功能条=拖动区（应用标+双面tab+篮角标+设置+自绘窗口控制钮）。
+// 切换通道：功能条 tab / 长按右键滑动(≥120px) / Ctrl+Tab(瞬切) / Ctrl+K 命令面板。
+// 设置 = 全屏覆盖浮层（不遮 winctl）；两面常驻挂载不卸载。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { api, waitEngine } from "./api";
+import { PhysicalPosition, PhysicalSize } from "@tauri-apps/api/dpi";
+import { api, engineBase, waitEngine } from "./api";
 import LibraryFace from "./faces/LibraryFace";
 import RespondFace from "./faces/RespondFace";
 import SettingsPanel from "./panels/SettingsPanel";
-import { initTheme } from "./theme";
+import { initTheme, initExternalFonts } from "./theme";
 import "./tokens.css";
 import "./styles.css";
 
@@ -64,6 +66,39 @@ function matchKey(e: KeyboardEvent, spec: string): boolean {
 const GESTURE_MIN = 10;    // 低于此位移放行右键菜单
 const GESTURE_DONE = 120;  // 达到此位移松手完成切换
 
+// ---------- 自绘线型图标（决策7：禁 emoji、禁现成库；1.4px 描边同族） ----------
+const IcoLib = () => (
+  <svg width="14" height="14" viewBox="0 0 16 16">
+    <path d="M2.5 13.5h11M3 10.5h10M3.5 7.5h9M5 4.5h6" />
+  </svg>);
+const IcoResp = () => (
+  <svg width="14" height="14" viewBox="0 0 16 16">
+    <path d="M3 3.5h10v7H8.5L6 13v-2.5H3zM5.5 6h5M5.5 8h3" />
+  </svg>);
+const IcoGear = () => (
+  <svg width="15" height="15" viewBox="0 0 16 16">
+    <circle cx="6" cy="5" r="1.6" /><circle cx="10" cy="11" r="1.6" />
+    <path d="M2.5 5h1.9M7.6 5h5.9M2.5 11h5.9M11.6 11h1.9" />
+  </svg>);
+const IcoPalette = () => (
+  <svg width="15" height="15" viewBox="0 0 16 16">
+    <path d="M3.5 4.5l3.5 3.5-3.5 3.5M8.5 11.5H13" />
+  </svg>);
+const IcoMin = () => (
+  <svg width="12" height="12" viewBox="0 0 16 16"><path d="M3.5 8h9" /></svg>);
+const IcoMax = () => (
+  <svg width="12" height="12" viewBox="0 0 16 16">
+    <rect x="4" y="4" width="8" height="8" rx="1" />
+  </svg>);
+const IcoRestore = () => (
+  <svg width="12" height="12" viewBox="0 0 16 16">
+    <path d="M6 5.5V4h6v6h-1.5M4 6h6v6H4z" />
+  </svg>);
+const IcoClose = () => (
+  <svg width="12" height="12" viewBox="0 0 16 16">
+    <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
+  </svg>);
+
 function App() {
   const [boot, setBoot] = useState<{ ready: boolean; msg: string; err?: string }>(
     { ready: false, msg: "正在启动本地引擎…" });
@@ -75,10 +110,9 @@ function App() {
   const [dragX, setDragX] = useState<number | null>(null); // 手势跟手位移
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [maximized, setMaximized] = useState(false);
   const [tourStep, setTourStep] = useState(() =>
     localStorage.getItem("de.tour") ? -1 : 0);
-  const [floatOn, setFloatOn] = useState(() =>
-    localStorage.getItem("de.float") !== "off");
   const [basketCount, setBasketCount] = useState(0);
   const [basketVersion, setBasketVersion] = useState(0);
   const [libraryQuery, setLibraryQuery] = useState("");
@@ -115,10 +149,44 @@ function App() {
 
   useEffect(() => { initTheme(); }, []);
 
+  // ---------- C6 窗口记忆：默认关；开启时启动恢复位置尺寸，移动/缩放去抖保存 ----------
+  useEffect(() => {
+    const win = getCurrentWindow();
+    if (localStorage.getItem("de.winmem") === "on") {
+      try {
+        const m = JSON.parse(localStorage.getItem("de.winrect") || "null");
+        if (m && m.w >= 960 && m.h >= 600) {
+          win.setPosition(new PhysicalPosition(m.x, m.y)).catch(() => {});
+          win.setSize(new PhysicalSize(m.w, m.h)).catch(() => {});
+        }
+      } catch { /* 记忆损坏则忽略，回默认居中 */ }
+    }
+    let t: number | undefined;
+    const save = async () => {
+      if (localStorage.getItem("de.winmem") !== "on") return;
+      try {
+        const pos = await win.outerPosition();
+        const size = await win.innerSize();
+        localStorage.setItem("de.winrect", JSON.stringify(
+          { x: pos.x, y: pos.y, w: size.width, h: size.height }));
+      } catch { /* 权限缺失时静默 */ }
+    };
+    const un1 = win.onMoved(() => {
+      window.clearTimeout(t); t = window.setTimeout(save, 500);
+    });
+    const un2 = win.onResized(() => {
+      window.clearTimeout(t); t = window.setTimeout(save, 500);
+      win.isMaximized().then(setMaximized).catch(() => {});
+    });
+    win.isMaximized().then(setMaximized).catch(() => {});
+    return () => { un1.then((f) => f()); un2.then((f) => f()); window.clearTimeout(t); };
+  }, []);
+
   useEffect(() => {
     waitEngine((msg) => setBoot({ ready: false, msg }))
       .then(async () => {
         setBoot({ ready: true, msg: "" });
+        initExternalFonts(engineBase());  // D12 字体外挂
         const s = await api.get<{ stances: StanceInfo[] }>("/api/stances")
           .catch(() => ({ stances: [] as StanceInfo[] }));
         setStances(s.stances);
@@ -128,7 +196,7 @@ function App() {
       .catch((e) => setBoot({ ready: false, msg: "", err: String(e) }));
   }, [refreshDocs, refreshBasket]);
 
-  // ---------- 面切换（含窗口标题联动） ----------
+  // ---------- 面切换（含任务栏标题联动） ----------
   const switchFace = useCallback((target?: Face, viaKeyboard = false) => {
     const next = target ?? (faceRef.current === "library" ? "respond" : "library");
     setInstant(viaKeyboard);
@@ -209,14 +277,26 @@ function App() {
     label: (s.title as string)?.replace(/^SKILL[:：]\s*/, "") || s.name,
   })), [stances]);
 
+  const win = getCurrentWindow();
+
   if (!boot.ready) {
     return (
-      <div className="boot">
-        <div className="boot-card">
-          <h1>Debate Engine</h1>
-          {boot.err
-            ? <p className="err">{boot.err}</p>
-            : <><div className="spinner" /><p>{boot.msg}</p></>}
+      <div className="shell2">
+        <header className="topbar" data-tauri-drag-region>
+          <span className="app-mark" data-tauri-drag-region>Debate Engine</span>
+          <div className="spacer" data-tauri-drag-region />
+          <div className="winctl">
+            <button onClick={() => win.minimize()} title="最小化"><IcoMin /></button>
+            <button className="win-close" onClick={() => win.close()} title="关闭"><IcoClose /></button>
+          </div>
+        </header>
+        <div className="boot">
+          <div className="boot-card">
+            <h1>Debate Engine</h1>
+            {boot.err
+              ? <p className="err">{boot.err}</p>
+              : <><div className="spinner" /><p>{boot.msg}</p></>}
+          </div>
         </div>
       </div>
     );
@@ -227,37 +307,57 @@ function App() {
 
   return (
     <div className="shell2">
-      <div className={"faces" + (instant || dragX !== null ? " no-anim" : "")}
-           style={{ transform: `translateX(${offset + dragOffset}%)` }}
-           onTransitionEnd={() => setInstant(false)}>
-        <section className="face" aria-hidden={face !== "library"}>
-          <LibraryFace stances={stanceOpts} docs={docs} stats={stats}
-                       active={face === "library"} notify={notify}
-                       refreshDocs={refreshDocs} respondWith={respondWith}
-                       basketChanged={refreshBasket}
-                       externalQuery={libraryQuery} />
-        </section>
-        <section className="face" aria-hidden={face !== "respond"}>
-          <RespondFace stances={stanceOpts} active={face === "respond"}
-                       notify={notify} prefill={respondPrefill}
-                       basketVersion={basketVersion}
-                       basketChanged={refreshBasket}
-                       onSaved={refreshDocs} />
-        </section>
-      </div>
-
-      {/* 悬浮组：主钮=切面（显示对面图标+素材篮角标），副钮=设置 */}
-      {floatOn && (
-        <div className="float-group">
-          <button className="float-main" onClick={() => switchFace()}
-                  title={`切换到${face === "library" ? "回应" : "知识库"}（${loadKeys().switch}）`}>
-            {face === "library" ? "⚔" : "🗄"}
+      {/* C1/C2 无外框功能条：整条空白带=拖动区，双击=最大化/还原 */}
+      <header className="topbar" data-tauri-drag-region
+              onDoubleClick={(e) => {
+                if ((e.target as HTMLElement).closest("button")) return;
+                win.toggleMaximize().catch(() => {});
+              }}>
+        <span className="app-mark" data-tauri-drag-region>Debate Engine</span>
+        <nav className="face-tabs">
+          <button className={face === "library" ? "on" : ""}
+                  onClick={() => switchFace("library")}><IcoLib />知识库</button>
+          <button className={face === "respond" ? "on" : ""}
+                  onClick={() => switchFace("respond")}>
+            <IcoResp />回应
             {basketCount > 0 && <span className="badge">{basketCount}</span>}
           </button>
-          <button className="float-gear" onClick={() => setSettingsOpen(true)}
-                  title={`设置（${loadKeys().settings}）`}>⚙</button>
+        </nav>
+        <span className="caps" data-tauri-drag-region>
+          {loadKeys().switch} 切面 · {loadKeys().palette} 面板</span>
+        <div className="spacer" data-tauri-drag-region />
+        <button className="tb-btn" title={`命令面板（${loadKeys().palette}）`}
+                onClick={() => setPaletteOpen(true)}><IcoPalette /></button>
+        <button className="tb-btn" title={`设置（${loadKeys().settings}）`}
+                onClick={() => setSettingsOpen(true)}><IcoGear /></button>
+        <div className="winctl">
+          <button onClick={() => win.minimize()} title="最小化"><IcoMin /></button>
+          <button onClick={() => win.toggleMaximize()} title={maximized ? "还原" : "最大化"}>
+            {maximized ? <IcoRestore /> : <IcoMax />}</button>
+          <button className="win-close" onClick={() => win.close()} title="关闭"><IcoClose /></button>
         </div>
-      )}
+      </header>
+
+      <div className="faces-area">
+        <div className={"faces" + (instant || dragX !== null ? " no-anim" : "")}
+             style={{ transform: `translateX(${offset + dragOffset}%)` }}
+             onTransitionEnd={() => setInstant(false)}>
+          <section className="face" aria-hidden={face !== "library"}>
+            <LibraryFace stances={stanceOpts} docs={docs} stats={stats}
+                         active={face === "library"} notify={notify}
+                         refreshDocs={refreshDocs} respondWith={respondWith}
+                         basketChanged={refreshBasket}
+                         externalQuery={libraryQuery} />
+          </section>
+          <section className="face" aria-hidden={face !== "respond"}>
+            <RespondFace stances={stanceOpts} active={face === "respond"}
+                         notify={notify} prefill={respondPrefill}
+                         basketVersion={basketVersion}
+                         basketChanged={refreshBasket}
+                         onSaved={refreshDocs} />
+          </section>
+        </div>
+      </div>
 
       {/* 设置：全屏覆盖浮层 */}
       {settingsOpen && (
@@ -267,15 +367,7 @@ function App() {
               <span>设置</span>
               <button className="link" onClick={() => setSettingsOpen(false)}>关闭 (Esc)</button>
             </div>
-            <SettingsPanel notify={notify}
-                           floatOn={floatOn}
-                           setFloatOn={(v) => {
-                             setFloatOn(v);
-                             localStorage.setItem("de.float", v ? "on" : "off");
-                             if (!v) notify(
-                               `悬浮按钮已隐藏。随时可用 ${loadKeys().switch} 切面、` +
-                               `${loadKeys().settings} 打开设置、${loadKeys().palette} 命令面板`);
-                           }} />
+            <SettingsPanel notify={notify} />
           </div>
         </div>
       )}
@@ -292,15 +384,15 @@ function App() {
         <div className="overlay tour" onClick={() => {}}>
           <div className="tour-card">
             {tourStep === 0 && <>
-              <h3>🗄 知识库面</h3>
+              <h3>知识库面</h3>
               <p>导入资料、检索、图谱 / 逻辑链 / 脉络可视化都在这一面。旧版「搜索 / 导入 / 图谱 / 溯源」已合并于此。</p>
             </>}
             {tourStep === 1 && <>
-              <h3>右上悬浮按钮</h3>
-              <p>点击切换两面；也可以 <b>{loadKeys().switch}</b> 瞬切，或按住右键左右滑动（超过一定距离生效）。</p>
+              <h3>顶部功能条</h3>
+              <p>窗口外框已收进这条功能条：拖空白处移动窗口、双击最大化。点「知识库 / 回应」切面；也可以 <b>{loadKeys().switch}</b> 瞬切，或按住右键左右滑动。</p>
             </>}
             {tourStep === 2 && <>
-              <h3>⚔ 回应面</h3>
+              <h3>回应面</h3>
               <p>输入对方言论，选择意图（反驳 / 批判 / 评价 / 分析 / 综合报告）生成带引用的回应。知识库面收集的素材会进入左侧素材篮。</p>
             </>}
             <div className="tour-nav">
@@ -331,8 +423,8 @@ function Palette({ close, switchFace, openSettings, searchWith, respondWith }: {
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => { inputRef.current?.focus(); }, []);
   const cmds = [
-    { key: "lib", label: "切到：🗄 知识库面", run: () => switchFace("library", true) },
-    { key: "resp", label: "切到：⚔ 回应面", run: () => switchFace("respond", true) },
+    { key: "lib", label: "切到：知识库面", run: () => switchFace("library", true) },
+    { key: "resp", label: "切到：回应面", run: () => switchFace("respond", true) },
     { key: "search", label: q ? `搜索：「${q}」` : "全局搜索…（输入关键词）",
       run: () => q && searchWith(q) },
     { key: "rebut", label: q ? `回应：「${q}」` : "发起回应…（输入对方论点）",

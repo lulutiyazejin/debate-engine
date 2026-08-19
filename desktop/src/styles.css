@@ -5,7 +5,7 @@
 html, body, #root { height: 100%; margin: 0; }
 body {
   background: var(--bg-0); color: var(--tx-1);
-  font: var(--fs-13)/var(--lh) "Segoe UI", "Microsoft YaHei", sans-serif;
+  font: var(--fs-13)/var(--lh) var(--sans);
   overflow: hidden;
 }
 button { font: inherit; color: var(--tx-1); background: var(--bg-2);
@@ -40,26 +40,46 @@ code { background: var(--bg-2); padding: 0 4px; border-radius: 4px; font-size: v
   border-radius: 50%; animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* ---------- 双面骨架（项目7） ---------- */
-.shell2 { height: 100%; overflow: hidden; position: relative; }
+/* ---------- 双面骨架（项目7）+ 0.1.3 无外框功能条（C1/C2） ---------- */
+.shell2 { height: 100%; overflow: hidden; position: relative;
+  display: flex; flex-direction: column; }
+.topbar { height: var(--topbar-h); display: flex; align-items: center;
+  gap: var(--sp-3); padding-left: var(--sp-4); background: var(--bg-1);
+  border-bottom: 1px solid var(--hairline); user-select: none; flex-shrink: 0; }
+.app-mark { font-weight: 700; letter-spacing: .01em; }
+.caps { font: var(--fs-11)/1.2 var(--mono); letter-spacing: .16em;
+  text-transform: uppercase; color: var(--tx-3); }
+.face-tabs { display: flex; gap: var(--sp-1); }
+.face-tabs button { background: none; border: none; color: var(--tx-2);
+  padding: 5px 14px; border-radius: 6px; display: inline-flex;
+  align-items: center; gap: 6px; }
+.face-tabs button:hover { color: var(--tx-1); background: var(--bg-2); }
+.face-tabs button.on { background: var(--accent-dim); color: var(--accent); }
+.face-tabs .badge { background: var(--accent); color: #fff; border-radius: 8px;
+  font-size: 10px; padding: 0 5px; line-height: 14px; }
+.tb-btn { width: 32px; height: 32px; display: inline-flex; align-items: center;
+  justify-content: center; background: none; border: none; color: var(--tx-3);
+  border-radius: 6px; padding: 0; }
+.tb-btn:hover { color: var(--tx-1); background: var(--bg-2); }
+.tb-btn { position: relative; }
+.tb-btn .badge { position: absolute; top: 1px; right: 1px;
+  background: var(--accent); color: #fff; border-radius: 8px;
+  font-size: 10px; padding: 0 4px; line-height: 13px; }
+.tb-btn svg, .winctl svg, .face-tabs svg { stroke: currentColor; fill: none;
+  stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.winctl { display: flex; height: var(--topbar-h); margin-left: var(--sp-2); }
+.winctl button { width: 46px; height: 100%; background: none; border: none;
+  border-radius: 0; color: var(--tx-3); display: inline-flex;
+  align-items: center; justify-content: center; padding: 0; }
+.winctl button:hover { background: var(--bg-3); color: var(--tx-1); }
+/* 关闭钮悬停 = 全软件唯一红色落点（决策2） */
+.winctl .win-close:hover { background: var(--err); color: #fff; }
+.faces-area { flex: 1; min-height: 0; overflow: hidden; position: relative; }
 .faces { display: flex; width: 200%; height: 100%;
-  transition: transform var(--t-move) ease-out; will-change: transform; }
+  transition: transform var(--t-move) var(--ease); will-change: transform; }
 .faces.no-anim { transition: none; }
 .face { width: 50%; height: 100%; overflow: hidden; }
 .face[aria-hidden="true"] { visibility: hidden; }
-
-/* 悬浮组（右上）：静止 40% 透明度，悬停实色 */
-.float-group { position: fixed; top: var(--sp-3); right: var(--sp-3);
-  display: flex; flex-direction: column; gap: var(--sp-2); z-index: 60; }
-.float-main, .float-gear { border-radius: 50%; border: 1px solid var(--hairline-strong);
-  background: var(--bg-2); opacity: .4; transition: opacity var(--t-fast);
-  position: relative; }
-.float-main { width: 44px; height: 44px; font-size: 19px; }
-.float-gear { width: 32px; height: 32px; font-size: 14px; align-self: center; opacity: .3; }
-.float-main:hover, .float-gear:hover { opacity: 1; }
-.float-main .badge { position: absolute; top: -4px; right: -4px;
-  background: var(--accent); color: #fff; border-radius: 8px;
-  font-size: 10px; padding: 0 5px; line-height: 15px; }
 
 /* 覆盖浮层（设置/命令面板/导览共用底） */
 .overlay { position: fixed; inset: 0; background: var(--bg-overlay);
@@ -330,3 +350,51 @@ code { background: var(--bg-2); padding: 0 4px; border-radius: 4px; font-size: v
   padding: var(--sp-2) 0; border-bottom: 1px solid var(--hairline);
   max-width: 460px; }
 .param-row input { width: 120px; }
+
+/* ---------- 0.1.3 D4：逻辑链流程图式（方框=论点·箭头标签=关系·自上而下=年代） ---------- */
+.chain-flow { flex: 1; overflow: auto; background: var(--canvas-bg);
+  padding: var(--sp-5); }
+.chain-col { max-width: 560px; margin: 0 auto; display: flex;
+  flex-direction: column; }
+.chain-hint { font: var(--fs-11)/1.2 var(--mono); letter-spacing: .16em;
+  text-transform: uppercase; color: var(--tx-3); text-align: center;
+  margin-bottom: var(--sp-4); }
+.chain-node { background: var(--bg-1); border: 1px solid var(--hairline-strong);
+  border-radius: 6px; padding: var(--sp-3) var(--sp-4);
+  animation: rise var(--t-fast) var(--ease) both; cursor: pointer; }
+.chain-node:hover { border-color: var(--tx-3); }
+.cn-claim { line-height: var(--lh); }
+.cn-src { font-size: var(--fs-12); color: var(--tx-3); margin-top: 2px;
+  font-variant-numeric: tabular-nums; }
+.chain-link { display: flex; flex-direction: column; align-items: center;
+  padding: 3px 0; color: var(--tx-3); }
+.cl-line { width: 1px; height: 12px; background: var(--hairline-strong); }
+.cl-head { font-size: 10px; line-height: 1; margin-top: -1px; }
+.chain-legend { display: flex; gap: var(--sp-4); justify-content: center;
+  padding: var(--sp-3); border-top: 1px solid var(--hairline);
+  font-size: var(--fs-12); color: var(--tx-3); flex-wrap: wrap; }
+
+/* ---------- 0.1.3 C5：本地模型下载进度 / 立场管理 ---------- */
+.pull-progress { display: inline-flex; flex-direction: column; gap: 3px;
+  min-width: 240px; max-width: 420px; }
+.pull-progress i { display: block; height: 6px; background: var(--accent);
+  border-radius: 3px; transition: width var(--t-fast) var(--ease); }
+.pull-progress em { font-style: normal; font-size: var(--fs-12); color: var(--tx-3); }
+.stance-import { width: 100%; min-height: 140px; font: var(--fs-12)/1.6 var(--mono); }
+
+/* ---------- 0.1.3 C4：确认屏全字段元数据编辑 ---------- */
+.meta-grid { display: grid; grid-template-columns: repeat(2, 1fr);
+  gap: var(--sp-2) var(--sp-4); margin: var(--sp-3) 0; }
+.meta-field { display: flex; flex-direction: column; gap: 2px; }
+.meta-field > span { font-size: var(--fs-12); color: var(--tx-3); }
+.enrich-tag { font-style: normal; font-size: 10px; color: var(--accent);
+  border: 1px solid var(--accent-dim); border-radius: 3px;
+  padding: 0 3px; margin-left: 4px; }
+
+/* ---------- 0.1.3 D6：确认卡/档案卡纸叠层 ---------- */
+.confirm-card { box-shadow: 0 1px 0 var(--hairline),
+  0 6px 0 -3px var(--bg-2), 0 7px 0 -3px var(--hairline); }
+/* 加载呼吸点（决策5：唯一持续动效） */
+.breath { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--accent); animation: breath 1.6s ease-in-out infinite; }
+@keyframes breath { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }

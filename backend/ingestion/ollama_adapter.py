@@ -85,33 +85,59 @@ def models_list() -> list[str] | None:
     return [m["name"].split(":")[0] for m in j.get("models") or []]
 
 
-def pull_model(name: str, progress_cb=None) -> tuple[bool, str]:
-    """流式 pull 一个模型（非真正的 SSE，用 /api/generate 的 last 回退）。
-    返回 (success, detail)。"""
+def pull_stream(name: str):
+    """流式 pull（B7）：逐行读 Ollama /api/pull 的 NDJSON，产出
+    {status, percent} 进度事件，最后产出 {done, ok, detail} 收尾事件。"""
+    import json
+
     import httpx
     url = f"{OLLAMA_HOST}/api/pull"
-    payload = {"name": name}
-    kw = {"proxy": config.httpx_proxy_for(url), "trust_env": config.httpx_trust_env_for(url)}
+    kw = {"proxy": config.httpx_proxy_for(url),
+          "trust_env": config.httpx_trust_env_for(url)}
     try:
-        r = httpx.post(url, json=payload, timeout=180, stream=True, **kw)
-        buf = []
-        for line in r.iter_lines():
-            if line:
-                try:
-                    j = line.json()
+        with httpx.Client(timeout=httpx.Timeout(1800, connect=5), **kw) as c:
+            with c.stream("POST", url, json={"name": name}) as r:
+                if r.status_code != 200:
+                    r.read()
+                    yield {"done": True, "ok": False,
+                           "detail": f"HTTP {r.status_code}: {r.text[:200]}"}
+                    return
+                ok = False
+                for line in r.iter_lines():
+                    if not line:
+                        continue
+                    try:
+                        j = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if j.get("error"):
+                        yield {"done": True, "ok": False,
+                               "detail": str(j["error"])[:200]}
+                        return
                     status = j.get("status", "")
-                    total = j.get("total", 0)
-                    completed = j.get("completed", 0)
-                    if total and completed and progress_cb:
-                        progress_cb(round(completed/total*100))
-                    buf.append(status)
-                except Exception:
-                    pass
-        if r.status_code == 200:
-            return True, "✅ 模型“{}”下载完成".format(name)
-        return False, "{}：{}".format(name, r.text[:200])
-    except Exception as e:
-        return False, "下载失败：{} — {}".format(name, str(e)[:100])
+                    total, completed = j.get("total", 0), j.get("completed", 0)
+                    pct = round(completed / total * 100) if total else None
+                    if status == "success":
+                        ok = True
+                    yield {"status": status, "percent": pct}
+                yield {"done": True, "ok": ok,
+                       "detail": (f"模型 {name} 下载完成" if ok
+                                  else "下载中断（未收到 success）")}
+    except Exception as e:  # noqa: BLE001 网络类异常统一收尾报告
+        yield {"done": True, "ok": False,
+               "detail": f"下载失败：{type(e).__name__} {str(e)[:120]}"}
+
+
+def pull_model(name: str, progress_cb=None) -> tuple[bool, str]:
+    """同步封装（测试/CLI 用）：消费 pull_stream 到收尾事件。"""
+    final = {"ok": False, "detail": "未开始"}
+    for evt in pull_stream(name):
+        if evt.get("done"):
+            final = evt
+            break
+        if progress_cb and evt.get("percent") is not None:
+            progress_cb(evt["percent"])
+    return bool(final.get("ok")), str(final.get("detail", ""))
 
 
 LOCAL_MODEL_CANDIDATES = {
