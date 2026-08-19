@@ -255,19 +255,24 @@ knowledge_base/                # 知识库数据目录（运行时，用户管�
 
 ---
 
-## 5. 待拆/豁免清单（V1.0 基线）
+## 5. 待拆/豁免清单（V1.1 基线）
 
-> 项目初始化阶段，以下文件预计超线，需在 V1.1 跟进处理。
+> 项目初始阶段，以下文件预计超线，需在后续版本跟进处理。基于 fresh line-count scan (v0.1.3+0.1.4)。
 
-| 文件 | 预估行数 | 上限 | 处置 | 复审版本 |
+| 文件 | 实际行数 | 上限 | 处置 | 责任批次 |
 |---|---|---|---|---|
-| `app/src/features/RebuttalPanel.tsx` | ~400 | 350（枢纽） | 考虑拆出 `ArgumentInput.tsx` / `RebuttalOutput.tsx` | V1.1 |
-| `backend/engine/rebuttal_engine.py` | ~320 | 300 | 考虑拆出 prompt 构建为 `prompt_builder.py` | V1.1 |
-| `backend/ingestion/summarizer.py` | ~280 | 250 | Map-Reduce/Refine/Gemini 三策略可各自独立文件 | V1.1 |
-| `app/src/features/IdeologyCube.tsx` | ~350 | 250（feature） | 3D 渲染逻辑拆出为 `lib/cubeRenderer.ts` | V1.1 |
-| `knowledge_base/skills/stances/marxist.skill.md` | ~200 | 300 | OK，暂无需处理 | — |
+| `desktop\src\panels\SettingsPanel.tsx` | 671 | 350（feature） | 批 5：拆为 providers/ollama/network/stancemgr/kb_migration/about 子组件 | 批 5 |
+| `backend\ingestion\indexer.py` | 522 | 250（ingestion） | 批 6：parser 独立 + 索引构建函数化；分步迁移 ALTER/INSERT | 批 6 |
+| `backend\storage\sqlite_store.py` | 476 | 250（storage） | 批 E：拆出 migrations.py + SQL chunks | 批 E |
+| `desktop\src\App.tsx` | 424 | 350（hub） | 批 2：Combobox Hook 抽取 + panel lazy loading | 批 2 |
+| `desktop\src\faces\LibraryFace.tsx` | 367 | 350（feature） | 批 2+：提取 SearchFilter hook / ResultsView 组件 | 批 2 |
+| `backend\engine\rebuttal_engine.py` | 285 | 300（engine） | OK（未超），保持监控 | — |
+| `backend\api\settings.py` | 281 | 120（router） | 批 5：拆分 proxy/ollama/chains/web_enrich 路由 | 批 5 |
+| `knowledge_base\sills\stances\*.skill.md` | ~200 | 300 | OK，暂无需处理 | — |
 
-**紧急程度排序（V1.0 基线）**：RebuttalPanel.tsx（主流程枢纽，最先触预警）＞ rebuttal_engine.py（核心逻辑膨胀风险高）＞ IdeologyCube.tsx（3D 渲染天然复杂）＞ summarizer.py（三策略分支容易混写）
+**紧急程度排序（V1.1 基线）**：SettingsPanel.tsx（最严重膨胀）＞ indexer.py/sqlite_store.py（核心模块）＞ App.tsx/LibraryFace.tsx（主流程入口）。优先批 5/6 执行时同步拆包。
+
+**验收规则**：触预警线就拆（不等强拆）；每个拆出文件须一句话职责说明（docstring/TS comment）；批边界三件事（编译 → 复读 diff → PLAN 台账追加）。
 
 ---
 
@@ -285,3 +290,20 @@ knowledge_base/                # 知识库数据目录（运行时，用户管�
 | 视觉层 | tokens v5 + G6 换皮 + 交互词汇常量 | 硬编码色值白名单制；样张 design-preview-frameless.html |
 
 行数管理影响：`web_enrich.py` 与 ollama 适配器新文件各 ≤250 行；`sqlite_store.py` 元数据扩展后若越线，拆 `migrations.py`（批 E 复审）。
+
+---
+
+## 7. 0.1.4 架构变更（详见 PLAN-0.1.4.md）
+
+| 子系统 | 变更 | 边界说明 |
+|---|---|---|
+| 数据根 | %APPDATA\DebateEngine\data-root.txt 覆盖 KNOWLEDGE_BASE_PATH；设置内迁移（wal_checkpoint→带进度复制→旧目录保留） | config 全路径派生变量，硬编码清零；.engine_port/fonts/settings 随根走 |
+| 存储层 | material_groups 表+素材 group_id（无孤儿）；archive/{立场}/{作者}/ 二级目录；标准化 md frontmatter 加 source_format+conversion | 旧 basket 存量迁移归公共组；reassign_stance 第七处同步档案库 |
+| 组件层 | engine/_extras/{name}/ 挂 sys.path；组件包=Release 多 asset；BGE 装完引导全库重嵌入（embedding_model 圈定） | 四态管理（未装/下载中/已装/禁用）；断点续传+sha256+代理三态+镜像 |
+| 回应层 | 三意图并入 styles.md（14 条单一轴）；stance 收 "none"（评价 stance_free 跳过 skill 注入）；中立评价归档目录 | INTENTS 保留作旧历史兼容别名；历史显示/回填/存KB 映射表完整 |
+| 解析层 | 三档：pypdf+借 pdfplumber 表格 / docling 可选 / RapidOCR 组件；csv 入支持；GBK 回退；read_html 表格+附件递归 | 403 反爬显式报告；OCR 无组件显式报告不静默 |
+| 阅读器层 | GET /docs/{id}/view（结构化视图模型，大表分页）+ GET /files/{id} 原件流；pdf.js/mammoth/SheetJS 解析+自绘渲染 | 查看与入库分家；marked 过 DOMPurify |
+| 设置层 | PATCH /api/config/task-chains（链编辑热生效）；archive_policy 可改入口 | 离线兜底不写入链；首选不可用注实际落点 |
+| 视觉层 | OKLCH 主色派生+对比兜底；线减法 11→4；高度阶梯 40/32/24；滚动条 token 化 | --err/stance 色/报告不跟主色；--hairline-strong 白名单制 |
+
+行数管理影响：阅读器视图模型/combobox/组件下载管理器新文件各 ≤250 行；`SettingsPanel.tsx` 扩分区后若越线，拆 `settings/` 子模块（批 5 复审）；安装器预置 skill 全文件存在即跳过或 .bak。

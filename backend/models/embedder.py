@@ -51,7 +51,8 @@ class BgeM3Embedder(EmbedderBase):
 
 class HashEmbedder(EmbedderBase):
     """降级实现：jieba 分词 + 特征哈希。确定性、免模型、词袋级相似度。"""
-    name = config.EMBEDDING_MODEL_NAME  # 同名，保证入库/检索版本一致
+    # 注意：impl 名加后缀区分（避免与生产 BGE-M3 同名导致重嵌入范围不准）
+    name = f"{config.EMBEDDING_MODEL_NAME}#hash"
 
     def embed_batch(self, texts):
         import jieba
