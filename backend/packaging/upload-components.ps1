@@ -29,7 +29,11 @@ foreach ($asset in $Assets) {
     $old = (Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/$($rel.id)/assets" -Headers $H -Proxy $proxy) | Where-Object { $_.name -eq $name }
     if ($old) { Invoke-RestMethod -Method Delete -Uri "https://api.github.com/repos/$repo/releases/assets/$($old.id)" -Headers $H -Proxy $proxy | Out-Null }
     $up = "https://uploads.github.com/repos/$repo/releases/$($rel.id)/assets?name=$name"
-    curl.exe -s --http1.1 -x $proxy --connect-timeout 20 --max-time 3600 `
+    # 0.1.6 实测配方：直连 + --ssl-no-revoke（代理断大文件 POST；直连默认过不了
+    # 吊销检查）；同名 starter 残包先删，否则 422。
+    $stale2 = (Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/$($rel.id)/assets" -Headers $H -Proxy $proxy) | Where-Object { $_.name -eq $name }
+    if ($stale2) { Invoke-RestMethod -Method Delete -Uri "https://api.github.com/repos/$repo/releases/assets/$($stale2.id)" -Headers $H -Proxy $proxy | Out-Null }
+    curl.exe -sS --http1.1 --ssl-no-revoke --connect-timeout 20 --max-time 3600 `
       -X POST -H "Authorization: Bearer $token" -H "Content-Type: application/octet-stream" `
       -H "Expect:" --data-binary "@$asset" -w "upload $name http=%{http_code}`n" -o "$env:TEMP\gh-asset.json" $up
     $state = (Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/$($rel.id)/assets" -Headers $H -Proxy $proxy) | Where-Object { $_.name -eq $name }

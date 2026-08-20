@@ -58,6 +58,11 @@ export default function LocalModelSection({ notify, onChanged, tick }: Props) {
 
   // 一键 pull（NDJSON 进度流）
   const pullModel = async (name: string) => {
+    // 0.1.6 补：Ollama 未运行时按钮不再装死——点击给明确指引
+    if (!ollama?.running) {
+      notify(`Ollama 未运行，先点上方的「一键启动」${ollama?.hint ? `（${ollama.hint}）` : ""}`);
+      return;
+    }
     setPulling(name); setPullPct(0); setPullMsg("连接中…");
     try {
       const r = await fetch(`${engineBase()}/api/config/ollama/pull`, {
@@ -133,6 +138,10 @@ export default function LocalModelSection({ notify, onChanged, tick }: Props) {
   // F3c：GGUF 导入
   const importGguf = async () => {
     if (!ggufPath.trim() || !ggufName.trim()) { notify("请填写 GGUF 路径与模型名"); return; }
+    if (!ollama?.running) {
+      notify(`Ollama 未运行，先点上方的「一键启动」${ollama?.hint ? `（${ollama.hint}）` : ""}`);
+      return;
+    }
     setImporting(true);
     try {
       const r = await api.post<{ ok: boolean; detail: string }>(
@@ -157,7 +166,7 @@ export default function LocalModelSection({ notify, onChanged, tick }: Props) {
             {hw.has_gpu
               ? <>检测到 {hw.gpu_name} · {hw.vram_gb}GB / 内存 {hw.ram_gb}GB
                   {hw.recommend && <> → 推荐 <code>{hw.recommend}</code>
-                    <button className="link" disabled={!ollama?.running || !!pulling}
+                    <button className="link" disabled={!!pulling}
                             onClick={() => pullModel(hw.recommend!)}>一键下载</button></>}
                 </>
               : <span className="muted small">{hw.note}</span>}
@@ -203,8 +212,9 @@ export default function LocalModelSection({ notify, onChanged, tick }: Props) {
                   <em>{pullPct}% {pullMsg}</em>
                 </span>
               ) : (
-                <button disabled={!ollama.running || !!pulling || !c.compat_ok}
-                        onClick={() => pullModel(c.name)}>
+                <button disabled={!!pulling}
+                        onClick={() => (c.compat_ok ? pullModel(c.name)
+                          : notify(`该模型需 Ollama ≥ ${c.min_runtime}，先升级 Ollama 再下载`))}>
                   {installed(c.name) ? "重新下载" : "下载并启用"}</button>
               )}
             </div>
@@ -218,7 +228,7 @@ export default function LocalModelSection({ notify, onChanged, tick }: Props) {
           <span className="controls">
             <input value={freeName} placeholder="任意 Ollama 模型名，如 phi4:14b"
                    onChange={(e) => setFreeName(e.target.value)} />
-            <button disabled={!ollama.running || !!pulling || !freeName.trim()}
+            <button disabled={!!pulling || !freeName.trim()}
                     onClick={() => pullModel(freeName.trim())}>下载并启用</button>
           </span></div>
 
@@ -275,7 +285,7 @@ export default function LocalModelSection({ notify, onChanged, tick }: Props) {
           <span className="controls">
             <input value={ggufName} placeholder="my-qwen:7b"
                    onChange={(e) => setGgufName(e.target.value)} />
-            <button disabled={!ollama.running || importing} onClick={importGguf}>
+            <button disabled={importing} onClick={importGguf}>
               {importing ? "导入中…" : "导入"}</button>
           </span></div>
       </>}
