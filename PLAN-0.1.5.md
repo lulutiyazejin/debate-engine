@@ -333,3 +333,36 @@
 - 错别字清理：兑底→保底/回退（model_router/settings/ollama_adapter/sqlite_store）
 - 门禁：tsc 0 错；vite build 通过（react 3.6K/viz 194K/index 318K）；pytest 77 通过。红线③④⑤待 D1 GUI 实测复核
 
+### 批 6 收尾（版本/自测/GitHub 源码 +tag）
+
+- `desktop/src-tauri/Cargo.toml`：版本升 0.1.5
+- `scripts/build_component_zips.py`：**新增**（A4/C3）组件 zip 打包脚本（ocr/docling→pip 安装打 zip；bge-m3→模型目录打 zip）
+- `PLAN-0.1.5.md`：追加批 3-4 台账
+- **GitHub**：`git init` → `remote add origin` → `add -A` → commit `[release] v0.1.5` → tag v0.1.5 → push origin main --tags（清理 v0.1.2 旧标签后成功；源码已推至 https://github.com/lulutiyazejin/debate-engine/tree/v0.1.5 ）
+- **安装包**：NSIS 打包需 Rust 环境（cargo tauri build），本地无 env 未编译；计划下版构建前拉 Cargo+Rustup。
+- 红线复核：③超墙三选（ImportPanel 已实现）、④槽失败 toast（RebutPanel 已实现）、⑤日期 roundtrip（ImportPanel year_raw 落库）——GUI 测试待后续实机。
+
+---
+
+### 批 5 可视化（J1/J3/J4，批 6 后补做）+ B2/B3 拆分 + 打包实录
+
+**后端**
+- `api/analysis.py`：新增 /coords（文档 22 轴点 + 立场画像均值）、/crosstab（立场×轴五档分箱，单元数/均值双指标）、/heatmap（章节×轴 |coord| 均值）三端点
+- **B2**：`storage/workspace_store.py` 新建（WorkspaceMixin：素材组/素材篮/回应历史），sqlite_store 598→439 行，调用方零改动
+- **B3**：`ingestion/duplicate.py`（内容哈希/语义查重）+ `ingestion/confirm.py`（ConfirmMixin：Stage 7-10）新建，indexer 600→392 行；PENDING 延迟导入避环形
+- 行数复扫：全部 <500 ✓；pytest 77 通过 ✓
+
+**前端**
+- `lib/axes.ts`：22 轴元数据（中文 label + 两极语义，与 classifier.AXES 对齐）；coordColor 红灰蓝恒定色标（决策 13 延伸）
+- `views/viz/`：ScatterView（J4 四象限，兼 J1 兜底）/ RadarView（J4 立场画像 22 轴多边形，chips 叠加）/ CrossTabView（J3 自绘表 + 章节热力子切换）/ CubeView（J1 G2 point3D 动态 import，WebGL 探测失败→提示+散点兜底）
+- `panels/VizPanel.tsx`：图谱区五段滑移（力导向/3D立方/散点/雷达/交叉），GraphPanel 零改动 always-mount；CubeView React.lazy 分包
+- 依赖：@antv/g2+g2-extension-3d+g-webgl+g-plugin-3d+g-plugin-control（npmmirror 绕 TLS）；tsc 0 错；vite build G2 自成 chunk（CubeView-*.js）
+
+**打包实录（三处版本 0.1.5：package.json/Cargo.toml/tauri.conf.json + config.VERSION + installer.nsi）**
+- ⚠ 踩坑：`generate_context!` 是编译期宏，lib.rs 没改时增量编译不重嵌 dist；且直接 `cargo build --release` 缺 prod 上下文会指向 devUrl（localhost:1420 拒连）。**正解：用本地 tauri CLI `tauri build --no-bundle`**
+- 流程：vite build → tauri build --no-bundle → PyInstaller onedir（引擎 0.1.5）→ makensis → release\DebateEngine-0.1.5-Setup.exe（~112MB）
+- 冒烟：打包引擎 health=0.1.5；/coords /crosstab /heatmap 全 200；静默安装后 GUI 实拍：六步导览 1/6、档案 tab、命令面板已删、图谱五段子投影、3D 立方 WebGL 场景 + 22 轴下拉端点语义副行（截图 shot-015-boot4/graph3/radar/xtab）
+- 遗留：雷达/交叉面的点击级实拍因坐标注入偏差未单独留图（代码路径与散点同构，tsc+构建+端点已验）；J5 AVA 洞察按 PLAN 后排不做
+
+**版本状态**：v0.1.5 批 1-6 全部落地（J5 后排除外），安装包已出，源码+安装包待推 GitHub。
+

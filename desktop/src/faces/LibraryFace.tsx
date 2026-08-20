@@ -10,7 +10,7 @@ import DocTree from "../components/DocTree";
 import ReaderModal from "../components/ReaderModal";
 import SegmentedSlider from "../components/SegmentedSlider";
 import ComparePanel from "../panels/ComparePanel";
-import GraphPanel from "../panels/GraphPanel";
+import VizPanel from "../panels/VizPanel";
 import ImportPanel from "../panels/ImportPanel";
 import ChainView from "../views/ChainView";
 import TimelineView from "../views/TimelineView";
@@ -310,7 +310,8 @@ export default function LibraryFace({
                   </div>
                 </div>
                 <div style={{ display: view === "graph" ? "contents" : "none" }}>
-                  <GraphPanel stances={stances} docs={docs} notify={notify}
+                  {/* 0.1.5 批 5：图谱区升级五段子投影（力导向/3D立方/散点/雷达/交叉） */}
+                  <VizPanel stances={stances} docs={docs} notify={notify}
                               active={active && view === "graph"}
                               onShowDoc={showDossier}
                               onChain={(anchor) => { setChainAnchor(anchor); setView("chain"); }} />

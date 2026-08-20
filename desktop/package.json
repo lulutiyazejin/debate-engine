@@ -1,7 +1,7 @@
 {
   "name": "desktop",
   "private": true,
-  "version": "0.1.4",
+  "version": "0.1.5",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,6 +10,11 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@antv/g-plugin-3d": "^2.1.1",
+    "@antv/g-plugin-control": "^2.1.1",
+    "@antv/g-webgl": "^2.1.1",
+    "@antv/g2": "^5.4.8",
+    "@antv/g2-extension-3d": "^1.0.0",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2",
     "@tauri-apps/plugin-opener": "^2",

@@ -130,3 +130,111 @@ def report(req: ReportRequest):
             req.topic, req.stances)
     except ValueError as e:
         raise HTTPException(422, str(e))
+
+
+# ---------- 0.1.5 批 5：可视化数据源（J1/J3/J4） ----------
+import json as _json
+
+_BINS = [(-5, -3), (-3, -1), (-1, 1), (1, 3), (3, 5)]   # J3 轴区间分箱（五档）
+
+
+def _coords_of(raw: str | None) -> dict:
+    """provenance/coordinates JSON → 纯数值轴字典（过滤 low_confidence 标记键）。"""
+    try:
+        d = _json.loads(raw or "{}")
+    except _json.JSONDecodeError:
+        return {}
+    if "coordinates" in d and isinstance(d["coordinates"], dict):
+        d = d["coordinates"]
+    return {k: float(v) for k, v in d.items() if isinstance(v, (int, float))}
+
+
+@router.get("/coords")
+def coords():
+    """J1/J4 数据源：文档 22 轴坐标点 + 立场画像（轴均值）。"""
+    db = get_db()
+    rows = db.conn.execute(
+        "SELECT doc_id,title,author,stance,provenance FROM documents "
+        "WHERE deleted_at IS NULL").fetchall()
+    docs = []
+    prof: dict[str, dict] = {}   # stance -> {axis: [sum, n]}
+    for r in rows:
+        c = _coords_of(r["provenance"])
+        if not c:
+            continue
+        docs.append({"doc_id": r["doc_id"], "title": r["title"],
+                     "author": r["author"], "stance": r["stance"] or "",
+                     "coords": c})
+        p = prof.setdefault(r["stance"] or "", {})
+        for k, v in c.items():
+            s = p.setdefault(k, [0.0, 0])
+            s[0] += v
+            s[1] += 1
+    profiles = [{"stance": s, "count": max((n for _, n in p.values()), default=0),
+                 "avg": {k: round(v / n, 2) for k, (v, n) in p.items() if n}}
+                for s, p in prof.items()]
+    return {"docs": docs, "profiles": profiles}
+
+
+@router.get("/crosstab")
+def crosstab(axis: str, metric: str = "count", metric_axis: str | None = None):
+    """J3 交叉透视：行=立场 × 列=axis 五档分箱 × 值=单元数/均值（metric_axis）。"""
+    db = get_db()
+    rows = db.conn.execute(
+        "SELECT a.coordinates, d.stance FROM arg_units a "
+        "JOIN documents d ON d.doc_id=a.doc_id WHERE d.deleted_at IS NULL"
+    ).fetchall()
+    # cells[stance][bin] = [count, metric_sum, metric_n]
+    cells: dict[str, list[list[float]]] = {}
+    for r in rows:
+        c = _coords_of(r["coordinates"])
+        if axis not in c:
+            continue
+        v = c[axis]
+        bi = next((i for i, (lo, hi) in enumerate(_BINS)
+                   if (lo <= v < hi) or (i == len(_BINS) - 1 and v == hi)), None)
+        if bi is None:
+            continue
+        row = cells.setdefault(r["stance"] or "", [[0, 0.0, 0] for _ in _BINS])
+        row[bi][0] += 1
+        if metric == "avg" and metric_axis and metric_axis in c:
+            row[bi][1] += c[metric_axis]
+            row[bi][2] += 1
+    out = []
+    for s, row in cells.items():
+        vals = ([cnt for cnt, _, _ in row] if metric == "count"
+                else [round(sm / n, 2) if n else None for _, sm, n in row])
+        out.append({"stance": s, "cells": vals,
+                    "total": sum(cnt for cnt, _, _ in row)})
+    out.sort(key=lambda x: -x["total"])
+    return {"bins": [f"{lo}〜{hi}" for lo, hi in _BINS], "rows": out}
+
+
+@router.get("/heatmap")
+def heatmap(doc_id: str):
+    """J4 热力：章节 × 轴 → 单元坐标强度均值（|coord| 均值，未涉及=null）。"""
+    db = get_db()
+    chs = db.conn.execute(
+        "SELECT chapter_id,title,chapter_num FROM chapters WHERE doc_id=? "
+        "ORDER BY chapter_num", (doc_id,)).fetchall()
+    units = db.conn.execute(
+        "SELECT a.coordinates, c.chapter_id FROM arg_units a "
+        "JOIN chunks c ON c.chunk_id=a.chunk_id WHERE a.doc_id=?",
+        (doc_id,)).fetchall()
+    from ingestion.classifier import AXES
+    acc: dict[str, dict[str, list[float]]] = {}   # chapter -> axis -> [sum, n]
+    for u in units:
+        c = _coords_of(u["coordinates"])
+        ch = u["chapter_id"] or ""
+        for k, v in c.items():
+            s = acc.setdefault(ch, {}).setdefault(k, [0.0, 0])
+            s[0] += abs(v)
+            s[1] += 1
+    chapters, grid = [], []
+    for ch in chs:
+        chapters.append(ch["title"] or f"第 {ch['chapter_num']} 章")
+        row = acc.get(ch["chapter_id"], {})
+        grid.append([round(row[a][0] / row[a][1], 2) if a in row and row[a][1]
+                     else None for a in AXES])
+    return {"axes": AXES, "chapters": chapters, "grid": grid}
+

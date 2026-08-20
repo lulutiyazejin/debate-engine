@@ -616,3 +616,37 @@ mark.hl { background: none; color: var(--accent); font-weight: 600; }
 .reader-frame { width: 100%; height: 100%; min-height: calc(86vh - 120px);
   border: none; background: var(--bg-2); }
 .reader-img { max-width: 100%; height: auto; }
+
+/* ---------- 0.1.5 批 5：可视化族（J1/J3/J4，viz-*） ---------- */
+.viz-panel { display: flex; flex-direction: column; min-height: 0; }
+.viz-seg { padding: 8px 14px 0; }
+.viz-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.viz-controls { padding: 10px 14px; flex-wrap: wrap; }
+.viz-canvas { flex: 1; min-height: 0; overflow: hidden; position: relative;
+  display: flex; align-items: stretch; justify-content: center; }
+.viz-cube { background: var(--canvas-bg, var(--bg-2)); }
+.viz-nogl { margin: var(--sp-2) 14px; padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--warn); border-radius: 6px;
+  color: var(--warn); font-size: var(--fs-12); }
+.viz-zero { stroke: var(--tx-4); stroke-width: 1; stroke-dasharray: 4 3; }
+.viz-frame { fill: none; stroke: var(--ln-1); }
+.viz-ring { fill: none; stroke: var(--ln-1); }
+.viz-spoke { stroke: var(--ln-1); stroke-width: .5; }
+.viz-axis-tag { fill: var(--tx-3); font-size: 10px; }
+.viz-axis-title { fill: var(--tx-2); font-size: 12px; }
+.viz-dot { cursor: pointer; transition: r var(--t-fast) var(--ease); }
+.viz-dot:hover { r: 7; }
+
+/* J3 交叉透视自绘表（决策 10 纸感 token） */
+.xtab-table { border-collapse: collapse; font-size: var(--fs-12);
+  margin: var(--sp-2) 14px; }
+.xtab-table th, .xtab-table td { border: 1px solid var(--ln-1);
+  padding: 4px var(--sp-2); text-align: center; min-width: 56px; }
+.xtab-table th { color: var(--tx-3); font-weight: 500;
+  background: var(--bg-2); }
+.xtab-table .xtab-head { text-align: left; color: var(--tx-2);
+  max-width: 180px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.xtab-table .xtab-total { color: var(--tx-3); }
+.heat-table th { font-size: 10px; min-width: 40px; }
+

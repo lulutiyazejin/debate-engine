@@ -14,7 +14,7 @@ except ImportError:
     pass
 
 # ---------- 版本（全局唯一来源，main/diagnostics/cli 均引用此处） ----------
-VERSION = "0.1.4"
+VERSION = "0.1.5"
 
 # ---------- 存储后端（服务器级抽象层：当前仅 sqlite，未来可插 postgres） ----------
 STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "sqlite")

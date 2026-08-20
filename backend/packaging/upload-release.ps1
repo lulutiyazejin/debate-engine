@@ -4,8 +4,8 @@
 param([switch]$WithInstaller)
 $ErrorActionPreference = "Stop"
 $repo = "lulutiyazejin/debate-engine"
-$tag = "v0.1.3"
-$asset = "release\DebateEngine-0.1.3-Setup.exe"
+$tag = "v0.1.5"
+$asset = "release\DebateEngine-0.1.5-Setup.exe"
 
 # 1. token：环境变量优先，否则从 Git 凭据管理器取
 $token = $env:CI_GITHUB_TOKEN
@@ -27,11 +27,15 @@ $ErrorActionPreference = "Stop"
 $body = @{
     tag_name = $tag; name = "Debate Engine $tag"
     body = @"
-0.1.3 纸感大版：无外框窗口（顶部功能条拖动/双击最大化/自绘窗控）+ v5 纸感视觉（双色板/发丝线/四书堆图标）。
+0.1.5 机制批 + 入库增强 + 可视化：
 
-新增：17 预置立场 + 立场管理（导入校验/删除/模板）、元数据全收集（确认屏八字段可编辑 + 联网补充维基/百科 + 手动永久优先）、本地模型一键下载（Ollama pull 进度条 + 热生效）、代理三态（直连/系统/自定义，本机始终直连）、连通自测、逻辑链垂直流程图、窗口记忆、字体外挂（knowledge_base/fonts 即放即用）。
+本地模型自主：硬件探测推荐、模型矩阵单一真源、上下文五档显存预估、一键拉起 Ollama、GGUF 导入；超墙三选（分章/换大窗/仍投喂）；小档模板变体；交互槽失败 toast。
 
-安装：下载 DebateEngine-0.1.3-Setup.exe 双击安装，详见安装说明。
+入库增强：中立评价存档、归档策略四选、版次联网补抓、附件批量导入、.xls 老格式、档案浏览树、迁移回滚、补生成摘要。
+
+可视化：图谱区五段子投影——力导向 / 3D 立方（G2 point3D，22 轴任选，红蓝色标，无 WebGL 兜底）/ 坐标散点 / 立场雷达 / 交叉分析（含章节热力）。另：命令面板移除、滑移分段器全局统一、日期零依赖解析。
+
+安装：下载 DebateEngine-0.1.5-Setup.exe 双击安装。
 "@
 } | ConvertTo-Json
 try {
