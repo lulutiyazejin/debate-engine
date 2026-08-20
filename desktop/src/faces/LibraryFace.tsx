@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { api } from "../api";
+import { askConfirm } from "../components/AppDialog";
 import type { DocRow, StanceOpt } from "../App";
 import Combobox, { Hl } from "../components/Combobox";
 import DocTree from "../components/DocTree";
@@ -180,7 +181,8 @@ export default function LibraryFace({
         if (dossier?.doc_id === doc.doc_id) showDossier(doc);
       } catch (e) { notify(`补摘要失败: ${e}`); }
     } else if (action === "delete") {
-      if (!window.confirm(`确定删除「${doc.title || doc.doc_id}」？\n将级联清除章节、切块、向量；档案库归档默认保留。`)) return;
+      if (!(await askConfirm({ title: `确定删除「${doc.title || doc.doc_id}」？`,
+          body: "将级联清除章节、切块、向量；档案库归档默认保留。", danger: true }))) return;
       try {
         await api.del(`/api/import/${doc.doc_id}`);
         notify("已删除");

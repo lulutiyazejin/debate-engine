@@ -2,6 +2,7 @@
 // 主题三态 / OKLCH 主色 / 窗口记忆 / 手势 / 快捷键。
 import { useState } from "react";
 import { loadKeys } from "../../../App";
+import { setUiPref } from "../../../lib/uiPrefs";
 import { getThemePref, setThemePref, type ThemePref,
          ACCENT_PRESETS, getAccentHue, setAccentHue } from "../../../theme";
 
@@ -21,7 +22,7 @@ export default function UiSection({ notify }: Props) {
     // 系统保留组合拒绝（Alt+Tab / Win 键由 OS 截获，设了也无效）
     if (/^(Alt\+Tab|Win\+|Meta\+)/i.test(v)) { notify("该组合被系统占用，无法使用"); return; }
     setKeySwitch(v);
-    localStorage.setItem("de.keys", JSON.stringify({ ...loadKeys(), switch: v }));
+    setUiPref("de.keys", JSON.stringify({ ...loadKeys(), switch: v }));
     notify(`切面快捷键已改为 ${v}`);
   };
 
@@ -57,7 +58,7 @@ export default function UiSection({ notify }: Props) {
         <input type="checkbox" checked={winMem}
                onChange={(e) => {
                  setWinMem(e.target.checked);
-                 localStorage.setItem("de.winmem", e.target.checked ? "on" : "off");
+                 setUiPref("de.winmem", e.target.checked ? "on" : "off");
                  notify(e.target.checked
                    ? "已开启窗口记忆：下次启动恢复上次的位置与大小"
                    : "已关闭窗口记忆：下次启动回默认尺寸居中");
@@ -68,14 +69,14 @@ export default function UiSection({ notify }: Props) {
         <input type="checkbox" checked={gestureOn}
                onChange={(e) => {
                  setGestureOn(e.target.checked);
-                 localStorage.setItem("de.gesture", e.target.checked ? "on" : "off");
+                 setUiPref("de.gesture", e.target.checked ? "on" : "off");
                }} /> 启用长按右键滑动切面（滑动超过一定距离生效）
       </label>
       <label className="chk">
         <input type="checkbox" checked={gestureInv}
                onChange={(e) => {
                  setGestureInv(e.target.checked);
-                 localStorage.setItem("de.gesture.invert", e.target.checked ? "1" : "0");
+                 setUiPref("de.gesture.invert", e.target.checked ? "1" : "0");
                }} /> 反转滑动方向（默认：向左滑 = 去右边的面）
       </label>
       <h3>快捷键</h3>

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "../../../api";
+import { askConfirm } from "../../../components/AppDialog";
 import DataDirSection from "../DataDirSection";
 
 interface Props {
@@ -62,7 +63,8 @@ export default function KbSection({ notify, tick }: Props) {
     try {
       const m = await api.post<{ documents: number; embedding_model: string }>(
         "/api/kb/verify", { path });
-      if (!window.confirm(`包内含 ${m.documents} 篇文档（嵌入模型 ${m.embedding_model}），合并入库？\n重复文档将跳过。`)) return;
+      if (!(await askConfirm({ title: "合并入库？",
+          body: `包内含 ${m.documents} 篇文档（嵌入模型 ${m.embedding_model}）。\n重复文档将跳过。` }))) return;
       const r = await api.post<{ imported: number; skipped: number; reembedded: number }>(
         "/api/kb/import", { path, on_duplicate: "skip" });
       notify(`合并完成：新入 ${r.imported}，跳过 ${r.skipped}，重嵌入 ${r.reembedded}`);

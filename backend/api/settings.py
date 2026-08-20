@@ -528,3 +528,30 @@ def migrate_data(req: MigratePost):
                               ensure_ascii=False) + "\n"
 
     return StreamingResponse(_stream(), media_type="application/x-ndjson")
+
+
+# ---------- 0.1.6 项 7：UI 偏好迁 settings.json（升级不丢） ----------
+@router.get("/config/ui-prefs")
+def get_ui_prefs():
+    """UI 偏好全量（主题/手势/快捷键/立方控件等，前端 localStorage 镜像）。"""
+    up = config.load_settings().get("ui_prefs")
+    return up if isinstance(up, dict) else {}
+
+
+@router.patch("/config/ui-prefs")
+def patch_ui_prefs(payload: dict):
+    """浅合并写回 ui_prefs 键（值为前端 localStorage 原串，无损往返）。"""
+    cur = config.load_settings().get("ui_prefs")
+    cur = dict(cur) if isinstance(cur, dict) else {}
+    cur.update({str(k): v for k, v in payload.items()})
+    config.save_settings({"ui_prefs": cur})
+    return cur
+
+
+@router.get("/config/paths")
+def get_paths():
+    """0.1.6 项 7/11：软件信息页显示设置文件/数据根/组件/模型目录（可定位可备份）。"""
+    return {"settings_path": str(config.SETTINGS_PATH),
+            "data_root": str(config.KNOWLEDGE_BASE_PATH),
+            "components_dir": str(config.EXTRAS_PATH),
+            "models_dir": str(config.MODELS_DIR)}

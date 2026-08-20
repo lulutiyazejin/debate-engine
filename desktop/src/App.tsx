@@ -9,7 +9,9 @@ import { api, engineBase, waitEngine } from "./api";
 import LibraryFace from "./faces/LibraryFace";
 import RespondFace from "./faces/RespondFace";
 import SettingsPanel from "./panels/SettingsPanel";
+import DialogHost from "./components/AppDialog";
 import { initTheme, initExternalFonts } from "./theme";
+import { syncUiPrefs } from "./lib/uiPrefs";
 import "./tokens.css";
 import "./styles.css";
 
@@ -183,6 +185,8 @@ function App() {
       .then(async () => {
         setBoot({ ready: true, msg: "" });
         initExternalFonts(engineBase());  // D12 字体外挂
+        await syncUiPrefs();              // 0.1.6 项 7：偏好继承+一次性迁移
+        initTheme();                      // 远端主题/主色灌回后重应用
         const s = await api.get<{ stances: StanceInfo[] }>("/api/stances")
           .catch(() => ({ stances: [] as StanceInfo[] }));
         setStances(s.stances);
@@ -207,13 +211,6 @@ function App() {
     let startX = 0, tracking = false, gesturing = false, suppressCtx = false;
     const invert = () => localStorage.getItem("de.gesture.invert") === "1";
     const enabled = () => localStorage.getItem("de.gesture") !== "off";
-    const fire = (dx: number) => {
-      // 一次性触发：立即停追踪，dragX 归零后 transition 接管到目标位
-      tracking = false; gesturing = false; suppressCtx = true;
-      setDragX(null);
-      const goRight = invert() ? dx > 0 : dx < 0;
-      switchFace(goRight ? "respond" : "library");
-    };
     const down = (e: MouseEvent) => {
       if (e.button !== 2 || !enabled()) return;
       startX = e.clientX; tracking = true; gesturing = false;
@@ -223,7 +220,8 @@ function App() {
       const dx = e.clientX - startX;
       if (!gesturing && Math.abs(dx) >= GESTURE_MIN) gesturing = true;
       if (!gesturing) return;
-      if (Math.abs(dx) >= GESTURE_MAX) { fire(dx); return; }
+      // 0.1.6 项 4：不再越限即切，GESTURE_MAX 只做跟手视觉上限；
+      // 切面统一在 mouseup 判定（滑回可取消）
       setDragX(Math.max(-GESTURE_MAX, Math.min(GESTURE_MAX, dx)));
     };
     const up = (e: MouseEvent) => {
@@ -361,6 +359,11 @@ function App() {
         </div>
       </div>
 
+      {/* 0.1.6 项 4：手势期提示条（松开才切，滑回可取消） */}
+      {dragX !== null && (
+        <div className="gesture-hint">松开切面 · 滑回取消</div>)}
+      <DialogHost />
+
       {/* 设置：全屏覆盖浮层 */}
       {settingsOpen && (
         <div className="overlay" onClick={() => setSettingsOpen(false)}>
@@ -368,9 +371,9 @@ function App() {
             <div className="overlay-head">
               <span>设置</span>
               <button className="link" title="关闭 (Esc)" onClick={() => setSettingsOpen(false)}>
-                {/* 0.1.5 E6：退出箭头入族——开放描边不闭合（去 z），round cap 同 1.4 描边族 */}
+                {/* 0.1.6 项 6：退出钮改「>」形 chevron（同 1.4 描边族） */}
                 <svg width="14" height="14" viewBox="0 0 16 16">
-                  <path d="M2.5 8h11 M10 4.5l4 3.5-4 3.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M5.5 2.5l5.5 5.5-5.5 5.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               </button>
             </div>

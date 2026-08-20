@@ -41,6 +41,8 @@ export default function SettingsPanel({ notify }: Props) {
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [customs, setCustoms] = useState<CustomProv[]>([]);
   const [version, setVersion] = useState("");
+  const [paths, setPaths] = useState<{ settings_path: string; data_root: string;
+    components_dir?: string; models_dir?: string } | null>(null);
   const [tick, setTick] = useState(0);          // 分区自取数据的刷新脉冲
   const navRef = useRef<HTMLDivElement>(null);
 
@@ -53,6 +55,9 @@ export default function SettingsPanel({ notify }: Props) {
       .then((r) => setCustoms(r.providers)).catch(() => {});
     api.get<{ version: string }>("/api/health")
       .then((r) => setVersion(r.version)).catch(() => {});
+    api.get<{ settings_path: string; data_root: string;
+              components_dir?: string; models_dir?: string }>("/api/config/paths")
+      .then(setPaths).catch(() => {});
     setTick((t) => t + 1);
   }, []);
   useEffect(refresh, [refresh]);
@@ -149,7 +154,17 @@ export default function SettingsPanel({ notify }: Props) {
           <h3>软件信息</h3>
           <div className="param-row"><span>名称</span><span>Debate Engine（辩论引擎）</span></div>
           <div className="param-row"><span>版本</span><code>{version || "读取中…"}</code></div>
-          <div className="param-row"><span>数据目录</span><span className="muted small">安装目录 knowledge_base/（文档、向量、日志、立场文件都在这里）</span></div>
+          {/* 0.1.6 项 7：真实路径可定位可备份（升级丢设置排障入口） */}
+          <div className="param-row"><span>设置文件</span>
+            <code className="small">{paths?.settings_path || "读取中…"}</code></div>
+          <div className="param-row"><span>数据根</span>
+            <code className="small">{paths?.data_root || "读取中…"}</code></div>
+          {/* 0.1.6 项 11：组件/模型独立文件夹（升级不覆盖） */}
+          <div className="param-row"><span>组件目录</span>
+            <code className="small">{paths?.components_dir || "读取中…"}</code></div>
+          <div className="param-row"><span>模型目录</span>
+            <code className="small">{paths?.models_dir || "读取中…"}</code></div>
+          <div className="param-row"><span>数据目录</span><span className="muted small">文档、向量、日志、立场文件都在数据根下；设置随数据根迁移继承，升级不丢。</span></div>
           <p className="muted small">
             知识库为个人研究用途本地存储；分享包导出时强制剥离日志与 API Key。
             问题排查请附 knowledge_base/logs 下当日日志。

@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import ForceGraph2D from "react-force-graph-2d";
 import { api } from "../api";
+import { askConfirm, askInput } from "../components/AppDialog";
+import { setUiPref } from "../lib/uiPrefs";
 import type { DocRow } from "../App";
 import Combobox from "../components/Combobox";
 
@@ -51,6 +53,9 @@ export default function GraphPanel({ stances, docs, notify, active, onChain,
   const [data, setData] = useState<{ nodes: GNode[]; links: GLink[] }>({ nodes: [], links: [] });
   const [building, setBuilding] = useState(false);
   const [menu, setMenu] = useState<{ x: number; y: number; node: GNode } | null>(null);
+  // 0.1.6 项 6：节点标签常显开关（不悬停也显名），偏好持久化
+  const [showLabels, setShowLabels] = useState(
+    () => localStorage.getItem("de.graph.labels") === "1");
   const [size, setSize] = useState({ w: 800, h: 520 });
   const hostRef = useRef<HTMLDivElement>(null);
   const fgRef = useRef<any>(null);          // 批 1：显式管缩放的图谱实例
@@ -137,7 +142,8 @@ export default function GraphPanel({ stances, docs, notify, active, onChain,
 
   const deleteNode = async (node: GNode) => {
     setMenu(null);
-    if (!window.confirm(`删除论证单元？\n「${node.claim}」`)) return;
+    if (!(await askConfirm({ title: "删除论证单元？",
+        body: `「${node.claim}」`, danger: true }))) return;
     try {
       await api.del(`/api/analysis/units/${node.id}`);
       notify("已删除");
@@ -149,7 +155,7 @@ export default function GraphPanel({ stances, docs, notify, active, onChain,
 
   const editNode = async (node: GNode) => {
     setMenu(null);
-    const claim = window.prompt("修正论点内容：", node.claim);
+    const claim = await askInput({ title: "修正论点内容", initial: node.claim });
     if (claim === null || claim.trim() === "" || claim === node.claim) return;
     try {
       await api.patch(`/api/analysis/units/${node.id}`, { claim: claim.trim() });
@@ -184,6 +190,11 @@ export default function GraphPanel({ stances, docs, notify, active, onChain,
         <button className="primary" onClick={buildRelations} disabled={building}>
           {building ? "对齐判定中…" : "生成/更新关系边"}
         </button>
+        <label className="chk">
+          <input type="checkbox" checked={showLabels}
+                 onChange={(e) => { setShowLabels(e.target.checked);
+                   setUiPref("de.graph.labels", e.target.checked ? "1" : "0"); }} />
+          常显节点标签</label>
         <span className="muted small">
           {data.nodes.length} 节点 · {data.links.length} 边 · 节点右键可纠错
         </span>
@@ -235,6 +246,22 @@ export default function GraphPanel({ stances, docs, notify, active, onChain,
               nodeLabel={(n: GNode) => `${n.claim}\n——${n.thinker || n.doc_title}`}
               nodeColor={(n: GNode) => stanceColor(n.stance)}
               nodeRelSize={5}
+              /* 项 6：常显标签叠在节点下方，论点截 12 字；关闭时仍悬停 nodeLabel */
+              nodeCanvasObjectMode={() => (showLabels ? "after" : undefined)}
+              nodeCanvasObject={(n: GNode, c: CanvasRenderingContext2D, scale: number) => {
+                if (!showLabels || n.x === undefined || n.y === undefined) return;
+                const txt = n.claim.length > 12 ? n.claim.slice(0, 12) + "…" : n.claim;
+                const fs = Math.max(2.5, 11 / scale);
+                c.save();
+                c.font = `${fs}px "Microsoft YaHei",sans-serif`;
+                c.textAlign = "center"; c.textBaseline = "top";
+                c.lineWidth = fs / 4;
+                c.strokeStyle = cssVar("--canvas-bg", "#16181d");
+                c.strokeText(txt, n.x, n.y + 7 / scale);
+                c.fillStyle = cssVar("--tx-2", "#c8c4bc");
+                c.fillText(txt, n.x, n.y + 7 / scale);
+                c.restore();
+              }}
               linkColor={(l: GLink) => edgeColor(l.relation)}
               linkWidth={2}
               linkLineDash={(l: GLink) => (l.relation === "refine" || l.relation === "analogy" ? [4, 3] : null)}

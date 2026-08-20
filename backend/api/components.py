@@ -33,9 +33,17 @@ _MS = "https://modelscope.cn/api/v1/models/lulutiyazejin/debate-engine-component
 # 注册表：url 列表按序尝试（主源→镜像）；sha256 为空则只校验体积>0
 _REGISTRY: dict[str, dict] = {
     "bge-m3": {
-        "label": "BGE-M3 嵌入模型", "kind": "model", "size_hint": "~2.3GB",
+        "label": "BGE-M3 嵌入模型", "kind": "model", "size_hint": "~2.2GB",
         "desc": "生产级语义向量（装完建议全库重嵌入）；未装时用哈希降级向量",
-        "urls": [f"{_GH}/bge-m3.zip", f"{_MS}=bge-m3.zip"],
+        # 0.1.6 拍板 1A：官方源多文件清单（GitHub Release 单资产≤2GiB 装不下
+        # pytorch_model.bin 2.27GB）；两源均实测 206 断点续传。小文件先、大权重后。
+        "sources": ["https://modelscope.cn/models/BAAI/bge-m3/resolve/master",
+                    "https://hf-mirror.com/BAAI/bge-m3/resolve/main"],
+        "files": ["config.json", "config_sentence_transformers.json",
+                  "modules.json", "sentence_bert_config.json",
+                  "special_tokens_map.json", "tokenizer_config.json",
+                  "sentencepiece.bpe.model", "1_Pooling/config.json",
+                  "tokenizer.json", "pytorch_model.bin"],
         "target": lambda: config.MODELS_DIR / "bge-m3",
         "pip_dev": ["FlagEmbedding>=1.2"],
     },
@@ -70,7 +78,11 @@ def _state(name: str, spec: dict) -> str:
         except ImportError:
             return "missing"
     target: Path = spec["target"]()
-    if not target.exists() or not any(target.iterdir()):
+    if spec.get("files"):
+        # 文件清单制：全部落齐才算已装（.part 残体不算）
+        if not all((target / f).exists() for f in spec["files"]):
+            return "missing"
+    elif not target.exists() or not any(target.iterdir()):
         return "missing"
     if (target / ".disabled").exists():
         return "disabled"
@@ -100,6 +112,84 @@ def list_components():
     return {"components": out, "embedder": st, "reembed_pending": pending}
 
 
+def _opener(url: str):
+    """代理三态 urllib opener：httpx_proxy_for 已含 system 模式注册表解析
+    （0.1.6 项 1）；无代理时空 ProxyHandler=直连。"""
+    import urllib.request
+    proxy = config.httpx_proxy_for(url)
+    handlers = ([urllib.request.ProxyHandler({"http": proxy, "https": proxy})]
+                if proxy else [urllib.request.ProxyHandler({})])
+    return urllib.request.build_opener(*handlers)
+
+
+def _download_files_stream(name: str, spec: dict):
+    """0.1.6 项 3：多文件清单下载（bge-m3 官方源）——逐文件独立 .part
+    Range 续传；单文件源挂自动换备源续同一文件；完成文件跳过；
+    全文件落齐才热生效。"""
+    import urllib.error
+    import urllib.request
+
+    target: Path = spec["target"]()
+    files: list[str] = spec["files"]
+    target.mkdir(parents=True, exist_ok=True)
+
+    def _emit(obj: dict) -> str:
+        return json.dumps(obj, ensure_ascii=False) + "\n"
+
+    for idx, rel in enumerate(files, 1):
+        dest = target / rel
+        if dest.exists() and dest.stat().st_size > 0:
+            continue    # 已完成文件跳过（续传/重试兼容）
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp = Path(str(dest) + ".part")
+        ok, last_err = False, ""
+        for base in spec["sources"]:
+            url = f"{base}/{rel}"
+            try:
+                done = tmp.stat().st_size if tmp.exists() else 0
+                req = urllib.request.Request(
+                    url, headers={"User-Agent": "DebateEngine"})
+                if done:
+                    req.add_header("Range", f"bytes={done}-")
+                    yield _emit({"status": f"({idx}/{len(files)}) {rel} 续传"
+                                           f"（已存 {done // 1048576}MB）"})
+                with _opener(url).open(req, timeout=60) as resp:
+                    if done and resp.status != 206:
+                        done = 0    # 源不支持 Range，从头下
+                    total = int(resp.headers.get("Content-Length", 0)) + done
+                    mode = "ab" if done else "wb"
+                    t0 = time.time()
+                    with open(tmp, mode) as f:
+                        while True:
+                            buf = resp.read(1024 * 256)
+                            if not buf:
+                                break
+                            f.write(buf)
+                            done += len(buf)
+                            if done % (1024 * 1024 * 4) < 1024 * 256:
+                                speed = done / max(time.time() - t0, 0.1)
+                                yield _emit({
+                                    "percent": round(done * 100 / max(total, 1), 1),
+                                    "status": f"({idx}/{len(files)}) {rel}",
+                                    "done_bytes": done, "speed_bps": int(speed)})
+                if tmp.stat().st_size == 0:
+                    raise OSError("空文件")
+                tmp.replace(dest)   # 原子改名=该文件完成
+                ok = True
+                break
+            except (urllib.error.URLError, urllib.error.HTTPError, OSError) as e:
+                last_err = f"{url} → {e}"
+                yield _emit({"status": f"源不可用换备源…（{e}）"})
+                continue
+        if not ok:
+            yield _emit({"done": True, "ok": False,
+                         "detail": f"下载失败：{last_err}。已下文件保留，"
+                                   f"可重试续传，或检查设置→网络与代理"})
+            return
+    _post_install(name)
+    yield _emit({"done": True, "ok": True, "detail": _done_detail(name)})
+
+
 def _download_stream(name: str, spec: dict):
     """zip 下载（Range 续传+镜像轮替）→ 解压 → 清理；开发态回落 pip --target。"""
     import urllib.error
@@ -111,13 +201,6 @@ def _download_stream(name: str, spec: dict):
 
     def _emit(obj: dict) -> str:
         return json.dumps(obj, ensure_ascii=False) + "\n"
-
-    # 代理三态：httpx_proxy_for 决定该 URL 走不走代理
-    def _opener(url: str):
-        proxy = config.httpx_proxy_for(url)
-        handlers = ([urllib.request.ProxyHandler({"http": proxy, "https": proxy})]
-                    if proxy else [urllib.request.ProxyHandler({})])
-        return urllib.request.build_opener(*handlers)
 
     last_err = ""
     for url in spec.get("urls", []):
@@ -167,7 +250,7 @@ def _download_stream(name: str, spec: dict):
                          "detail": _done_detail(name)})
             return
         except (urllib.error.URLError, urllib.error.HTTPError, OSError) as e:
-            last_err = str(e)
+            last_err = f"{url} → {e}"    # 0.1.6 项 3：带源 URL+状态码区分资产缺失/网络
             yield _emit({"status": f"源不可用，换镜像…（{e}）"})
             continue
     # 全部 zip 源失败：开发态（未冻结）回落 pip --target
@@ -215,8 +298,9 @@ def install_component(name: str):
         raise HTTPException(404, f"未知组件 {name}")
     if spec["kind"] == "external":
         raise HTTPException(422, "外部引擎请按官网安装，本软件只做检测")
-    return StreamingResponse(_download_stream(name, spec),
-                             media_type="application/x-ndjson")
+    stream = (_download_files_stream(name, spec) if spec.get("files")
+              else _download_stream(name, spec))
+    return StreamingResponse(stream, media_type="application/x-ndjson")
 
 
 @router.post("/{name}/disable")

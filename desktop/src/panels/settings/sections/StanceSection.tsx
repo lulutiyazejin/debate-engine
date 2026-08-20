@@ -2,6 +2,7 @@
 // 立场清单（预置不可删）+ 模板导入校验。全名（含括号注记）仅此处与 skill 文件可见（I6）。
 import { useEffect, useState } from "react";
 import { api } from "../../../api";
+import { askConfirm } from "../../../components/AppDialog";
 
 interface StanceRow { name: string; title?: string; builtin?: boolean; doc_count?: number }
 
@@ -31,7 +32,8 @@ export default function StanceSection({ notify, onChanged, tick }: Props) {
   };
 
   const delStance = async (name: string) => {
-    if (!window.confirm(`删除立场 ${name}？其名下文档不会删除，只失去检索偏好。`)) return;
+    if (!(await askConfirm({ title: `删除立场 ${name}？`,
+        body: "其名下文档不会删除，只失去检索偏好。", danger: true }))) return;
     try { await api.del(`/api/stances/${name}`); notify("已删除并热生效"); onChanged(); }
     catch (e) { notify(`删除失败: ${e}`); }
   };

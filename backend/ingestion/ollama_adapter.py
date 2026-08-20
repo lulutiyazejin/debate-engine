@@ -98,13 +98,17 @@ _SERVE_PROC = None   # 一键拉起的子进程句柄（随引擎生命周期）
 
 def download_channel() -> dict:
     """0.1.5 F3b：下载通道事实——真正的模型下载发生在 Ollama 进程内，
-    只有经本软件拉起（注入代理环境变量）的实例才走代理。"""
+    只有经本软件拉起（注入代理环境变量）的实例才走代理。
+    0.1.6 项 1：system 模式显示解析后的真实地址，未设=直连不误导。"""
     cfg = config.proxy_config()
     via = _SERVE_PROC is not None and _SERVE_PROC.poll() is None
     if cfg["mode"] == "custom" and cfg["url"] and via:
         return {"mode": "proxy", "detail": cfg["url"]}
     if cfg["mode"] == "system" and via:
-        return {"mode": "system", "detail": "跟随系统代理"}
+        sp = config.system_proxy_url()
+        return {"mode": "system",
+                "detail": (f"跟随系统代理 {sp}" if sp
+                           else "跟随系统代理（当前系统未设代理=直连）")}
     return {"mode": "direct", "detail": "直连"}
 
 
@@ -123,11 +127,16 @@ def serve_start() -> tuple[bool, str]:
         return False, "未找到 ollama 可执行文件，请先安装：https://ollama.ai/download"
     env = dict(os.environ)
     cfg = config.proxy_config()
+    # 0.1.6 项 1：Ollama pull 只认 HTTPS_PROXY（官方 FAQ），HTTP_PROXY 无用
+    # 且可能干扰客户端连接；一律先清残留再按三态写入。
+    env.pop("HTTPS_PROXY", None)
+    env.pop("HTTP_PROXY", None)
     if cfg["mode"] == "custom" and cfg["url"]:
-        env["HTTPS_PROXY"] = env["HTTP_PROXY"] = cfg["url"]
-    elif cfg["mode"] == "off":
-        env.pop("HTTPS_PROXY", None)
-        env.pop("HTTP_PROXY", None)
+        env["HTTPS_PROXY"] = cfg["url"]
+    elif cfg["mode"] == "system":
+        sp = config.system_proxy_url()
+        if sp:
+            env["HTTPS_PROXY"] = sp
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     try:
         _SERVE_PROC = subprocess.Popen([exe, "serve"], env=env,

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api, engineBase } from "../../api";
+import { askConfirm } from "../../components/AppDialog";
 
 interface DataRoot {
   path: string; marker: string; overridden: boolean;
@@ -65,7 +66,8 @@ export default function DataDirSection({ notify }: { notify: (msg: string) => vo
 
   // 0.1.5 D5：回滚到旧目录（删标记回默认路径，需旧库在）
   const rollback = async () => {
-    if (!window.confirm(`回滚到旧目录？\n${root?.old_path}\n重启软件后生效；迁移后的目录保留不删。`)) return;
+    if (!(await askConfirm({ title: "回滚到旧目录？",
+        body: `${root?.old_path}\n重启软件后生效；迁移后的目录保留不删。` }))) return;
     try {
       const r = await api.post<{ ok: boolean; detail: string }>(
         "/api/config/data-root/rollback", {});

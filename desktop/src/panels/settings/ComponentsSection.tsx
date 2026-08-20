@@ -1,7 +1,9 @@
 // 0.1.4 批 5（决策 11）：组件中心——卡片四态（未装/下载中/已装/禁用）。
 // 下载走 NDJSON 进度流（断点续传由后端负责）；BGE-M3 装完引导全库重嵌入。
-import { useCallback, useEffect, useState } from "react";
+// 0.1.6 项 10：暂停/取消（AbortController 断流，.part 保留，续下接着传）。
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../api";
+import { askConfirm } from "../../components/AppDialog";
 import { ndjsonPost, fmtSpeed } from "../../lib/ndjson";
 
 interface CompRow {
@@ -21,6 +23,10 @@ export default function ComponentsSection({ notify }: { notify: (msg: string) =>
   const [busy, setBusy] = useState("");        // 正在下载/重嵌入的组件名
   const [pct, setPct] = useState(0);
   const [msg, setMsg] = useState("");
+  // 项 10：暂停态（保留进度，「继续」重发请求由 .part+Range 接着传）
+  const [paused, setPaused] = useState<{ key: string; path: string; pct: number } | null>(null);
+  const ctlRef = useRef<AbortController | null>(null);
+  const abortKind = useRef<string>("");        // "pause" | "cancel" | ""
 
   const refresh = useCallback(() => {
     api.get<CompList>("/api/components").then(setData).catch(() => {});
@@ -28,18 +34,31 @@ export default function ComponentsSection({ notify }: { notify: (msg: string) =>
   useEffect(refresh, [refresh]);
 
   const runStream = async (key: string, path: string) => {
-    setBusy(key); setPct(0); setMsg("连接中…");
+    setPaused(null); setBusy(key); setPct(0); setMsg("连接中…");
+    const ctl = new AbortController();
+    ctlRef.current = ctl; abortKind.current = "";
+    let last = 0;
     try {
       await ndjsonPost(path, {}, (evt) => {
         if (evt.done) notify(evt.detail || (evt.ok ? "完成" : "失败"));
         else {
-          if (typeof evt.percent === "number") setPct(evt.percent);
+          if (typeof evt.percent === "number") { setPct(evt.percent); last = evt.percent; }
           if (evt.status) setMsg(evt.status);
           else if (typeof evt.speed_bps === "number") setMsg(fmtSpeed(evt.speed_bps));
         }
-      });
-    } catch (e) { notify(`失败: ${e}`); }
-    finally { setBusy(""); refresh(); }
+      }, ctl.signal);
+    } catch (e) {
+      if (ctl.signal.aborted) {
+        if (abortKind.current === "pause") setPaused({ key, path, pct: last });
+        // cancel：回「下载并启用」，.part 保留下次续传
+      } else notify(`失败: ${e}`);
+    }
+    finally { ctlRef.current = null; setBusy(""); refresh(); }
+  };
+
+  const interrupt = (kind: "pause" | "cancel") => {
+    abortKind.current = kind;
+    ctlRef.current?.abort();
   };
 
   const toggle = async (c: CompRow) => {
@@ -52,7 +71,8 @@ export default function ComponentsSection({ notify }: { notify: (msg: string) =>
   };
 
   const remove = async (c: CompRow) => {
-    if (!window.confirm(`删除组件 ${c.label}？可随时重新下载。`)) return;
+    if (!(await askConfirm({ title: `删除组件 ${c.label}？`,
+        body: "可随时重新下载。", danger: true }))) return;
     try { await api.del(`/api/components/${c.name}`); notify("已删除"); refresh(); }
     catch (e) { notify(`删除失败: ${e}`); }
   };
@@ -76,10 +96,23 @@ export default function ComponentsSection({ notify }: { notify: (msg: string) =>
           <div className="muted small">{c.desc}</div>
           <div className="controls">
             {busy === c.name ? (
-              <span className="pull-progress" title={msg}>
-                <i style={{ width: `${pct}%` }} />
-                <em>{pct}% {msg}</em>
-              </span>
+              <>
+                <span className="pull-progress" title={msg}>
+                  <i style={{ width: `${pct}%` }} />
+                  <em>{pct}% {msg}</em>
+                </span>
+                {/* 项 10：断流不删 .part，继续/重下都走 Range 续传 */}
+                <button onClick={() => interrupt("pause")}>暂停</button>
+                <button className="danger-btn" onClick={() => interrupt("cancel")}>取消</button>
+              </>
+            ) : paused?.key === c.name ? (
+              <>
+                <span className="muted small">已暂停 · {paused.pct}%</span>
+                <button className="primary" disabled={!!busy}
+                        onClick={() => runStream(paused.key, paused.path)}>继续</button>
+                <button className="danger-btn" disabled={!!busy}
+                        onClick={() => setPaused(null)}>取消</button>
+              </>
             ) : c.kind === "external" ? (
               <a className="link" href={c.homepage} target="_blank" rel="noreferrer">
                 官网安装说明 ↗</a>

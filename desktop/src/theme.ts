@@ -2,6 +2,7 @@
 // 关键点：Tauri Window.setTheme 驱动 DWM 标题栏随主题（Win10 1809+），
 // data-theme 驱动 tokens.css 双色板；跟随系统时监听 onThemeChanged。
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { setUiPref } from "./lib/uiPrefs";
 
 export type ThemePref = "dark" | "light" | "system";
 
@@ -18,7 +19,7 @@ function apply(mode: "dark" | "light") {
 }
 
 export async function setThemePref(pref: ThemePref): Promise<void> {
-  localStorage.setItem(KEY, pref);
+  setUiPref(KEY, pref);   // 0.1.6 项 7：双写 localStorage+后端镜像
   const win = getCurrentWindow();
   unlisten?.();
   unlisten = null;
@@ -62,7 +63,7 @@ function applyAccent(hue: number) {
 }
 
 export function setAccentHue(hue: number): void {
-  localStorage.setItem(ACCENT_KEY, String(hue));
+  setUiPref(ACCENT_KEY, String(hue));   // 0.1.6 项 7：镜像后端
   applyAccent(hue);
 }
 

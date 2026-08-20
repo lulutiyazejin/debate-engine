@@ -63,8 +63,9 @@ export default function VizPanel({ stances, docs, notify, active,
                     onChain={onChain} onShowDoc={onShowDoc} />
       </div>
       {mode === "cube" && (
-        <Suspense fallback={<div className="empty-state"><p>3D 引擎加载中…</p></div>}>
-          <CubeView docs={coordDocs ?? []} active={active} fallback={scatter} />
+        <Suspense fallback={<div className="empty-state"><p>立方视图加载中…</p></div>}>
+          {/* 0.1.6 项 5：自绘 canvas 2D，无 WebGL 依赖，没有散点备选注入 */}
+          <CubeView docs={coordDocs ?? []} active={active} stances={stances} />
         </Suspense>
       )}
       {mode === "scatter" && scatter}

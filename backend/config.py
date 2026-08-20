@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 try:
@@ -14,7 +15,7 @@ except ImportError:
     pass
 
 # ---------- 版本（全局唯一来源，main/diagnostics/cli 均引用此处） ----------
-VERSION = "0.1.5"
+VERSION = "0.1.6"
 
 # ---------- 存储后端（服务器级抽象层：当前仅 sqlite，未来可插 postgres） ----------
 STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "sqlite")
@@ -57,17 +58,43 @@ SOURCE_FILES_PATH = KNOWLEDGE_BASE_PATH / "source_files"
 INDEX_MD_PATH = KNOWLEDGE_BASE_PATH / "INDEX.md"
 
 # ---------- 嵌入模型与组件中心（0.1.4 批 5 决策 11） ----------
-MODELS_DIR = KNOWLEDGE_BASE_PATH / "models"          # 组件中心下载的模型落数据根
-EXTRAS_PATH = BACKEND_DIR / "engine" / "_extras"     # python 组件包落盘目录
+# 0.1.6 项 11：模型/组件独立文件夹落安装目录（frozen=exe 上上级=安装根，dev=项目根）。
+# 旧 EXTRAS=engine/_extras 升级安装覆盖 engine 目录会冲掉已装组件（真 bug）；
+# 新目录 installer 不打包不覆盖，升级保留。
+INSTALL_DIR = (Path(sys.executable).resolve().parent.parent
+               if getattr(sys, "frozen", False) else PROJECT_ROOT)
+MODELS_DIR = INSTALL_DIR / "models"                  # 组件中心下载的模型
+EXTRAS_PATH = INSTALL_DIR / "components"             # python 组件包落盘目录
 _BGE_DL = MODELS_DIR / "bge-m3"
-BGE_M3_PATH = Path(os.getenv("BGE_M3_PATH",
-                             str(_BGE_DL if _BGE_DL.exists()
-                                 else PROJECT_ROOT / "models" / "bge-m3")))
+BGE_M3_PATH = Path(os.getenv("BGE_M3_PATH", str(_BGE_DL)))
+
+
+def migrate_component_dirs() -> None:
+    """0.1.6 项 11 首启一次性搬移（幂等）：旧 engine/_extras 组件包、
+    旧数据根 models/bge-m3 → 安装目录独立文件夹；新位置已存在则跳过。"""
+    import shutil
+    old_extras = BACKEND_DIR / "engine" / "_extras"
+    try:
+        if old_extras.exists():
+            EXTRAS_PATH.mkdir(parents=True, exist_ok=True)
+            for d in old_extras.iterdir():
+                if d.is_dir() and not (EXTRAS_PATH / d.name).exists():
+                    shutil.move(str(d), str(EXTRAS_PATH / d.name))
+    except OSError:
+        pass
+    old_model = KNOWLEDGE_BASE_PATH / "models" / "bge-m3"
+    try:
+        if old_model.exists() and not _BGE_DL.exists():
+            MODELS_DIR.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(old_model), str(_BGE_DL))
+    except OSError:
+        pass
 
 
 def mount_extras() -> list[str]:
     """启动时把已安装且未禁用的组件包目录挂 sys.path（禁用= .disabled 标记）。"""
     import sys as _sys
+    migrate_component_dirs()   # 项 11：挂载前先完成旧目录搬移
     mounted: list[str] = []
     try:
         if EXTRAS_PATH.exists():
@@ -229,10 +256,40 @@ def proxy_config() -> dict:
     return {"mode": mode, "url": str(p.get("url") or "")}
 
 
+def system_proxy_url() -> str | None:
+    """0.1.6 项 1：解析系统代理真实地址。
+    Windows 读注册表 Internet Settings（ProxyEnable+ProxyServer）；
+    PAC 脚本模式（ProxyServer 空）无法解析返回 None；
+    非 Windows 回落环境变量 HTTPS_PROXY。安装版引擎由 Tauri 干净环境
+    拉起不带 env，故 system 模式必须主动解析而非信任环境。"""
+    if sys.platform == "win32":
+        try:
+            import winreg
+            k = winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Internet Settings")
+            enable, _ = winreg.QueryValueEx(k, "ProxyEnable")
+            server, _ = winreg.QueryValueEx(k, "ProxyServer")
+            winreg.CloseKey(k)
+            if not enable or not str(server).strip():
+                return None
+            server = str(server).strip()
+            # 多协议形式 "http=127.0.0.1:7890;https=..." 取 https/http 段
+            if "=" in server:
+                parts = dict(p.split("=", 1) for p in server.split(";") if "=" in p)
+                server = parts.get("https") or parts.get("http") or ""
+            if not server:
+                return None
+            return server if "://" in server else f"http://{server}"
+        except OSError:
+            return None
+    return os.getenv("HTTPS_PROXY") or os.getenv("https_proxy") or None
+
+
 def httpx_proxy_for(url: str) -> str | None:
     """按代理三态给 httpx 的 proxy 参数；127.0.0.1/localhost 一律 bypass
-    （否则自定义代理会切断本地 ollama）。system 模式交还环境变量（返回 None
-    且不清 trust_env）；off 模式由调用方置 trust_env=False。"""
+    （否则代理会切断本地 ollama）。system 模式解析注册表真实地址
+    （0.1.6 项 1：不再依赖环境变量，安装版干净环境也能走代理）。"""
     try:
         host = url.split("://", 1)[-1].split("/", 1)[0].split(":")[0]
     except Exception:
@@ -242,19 +299,15 @@ def httpx_proxy_for(url: str) -> str | None:
     cfg = proxy_config()
     if cfg["mode"] == "custom" and cfg["url"]:
         return cfg["url"]
+    if cfg["mode"] == "system":
+        return system_proxy_url()
     return None
 
 
 def httpx_trust_env_for(url: str) -> bool:
-    """off=不信环境变量（彻底直连）；system=信；custom=不信（只走自填）。
-    本地地址永远 False，避免系统代理劫持 ollama。"""
-    try:
-        host = url.split("://", 1)[-1].split("/", 1)[0].split(":")[0]
-    except Exception:
-        host = ""
-    if host in _LOCAL_HOSTS:
-        return False
-    return proxy_config()["mode"] == "system"
+    """0.1.6 项 1：统一 False——代理一律由 httpx_proxy_for 显式传参，
+    不再信环境变量（语义简化，避免 shell 残留 env 干扰）。"""
+    return False
 
 
 apply_settings()

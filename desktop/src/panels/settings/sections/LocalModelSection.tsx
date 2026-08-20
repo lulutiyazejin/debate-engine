@@ -3,6 +3,7 @@
 // F2 上下文档位（自动/手动五档+每档显存预估）+ F3b 一键启动/下载通道 +
 // F3c 本地 GGUF 导入。数据源=G2 模型矩阵（后端单一真源）。
 import { useCallback, useEffect, useState } from "react";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api, engineBase } from "../../../api";
 
 export interface Candidate {
@@ -112,6 +113,23 @@ export default function LocalModelSection({ notify, onChanged, tick }: Props) {
     } catch (e) { notify(`保存失败: ${e}`); }
   };
 
+  // 0.1.6 项 2：系统文件选择器选 .gguf；命名空时自动取文件名
+  // （去 .gguf、小写、非法字符→-，符后端 GgufImport pattern）
+  const browseGguf = async () => {
+    const p = await openDialog({
+      multiple: false,
+      filters: [{ name: "GGUF 权重", extensions: ["gguf"] }],
+    });
+    if (typeof p !== "string") return;
+    setGgufPath(p);
+    if (!ggufName.trim()) {
+      const base = p.replace(/\\/g, "/").split("/").pop() || "";
+      const nm = base.replace(/\.gguf$/i, "").toLowerCase()
+        .replace(/[^a-z0-9._:-]+/g, "-").replace(/^-+|-+$/g, "");
+      if (nm) setGgufName(nm);
+    }
+  };
+
   // F3c：GGUF 导入
   const importGguf = async () => {
     if (!ggufPath.trim() || !ggufName.trim()) { notify("请填写 GGUF 路径与模型名"); return; }
@@ -161,7 +179,7 @@ export default function LocalModelSection({ notify, onChanged, tick }: Props) {
           <div className="param-row"><span>下载通道</span>
             <span className="muted small">
               {ollama.channel.mode === "proxy" ? `代理 ${ollama.channel.detail}`
-                : ollama.channel.mode === "system" ? "跟随系统代理" : "直连"}
+                : ollama.channel.detail /* 0.1.6 项 1：system 显解析后真实地址 */}
             </span></div>)}
         {ollama.active_model && (
           <div className="param-row"><span>当前生效模型</span><code>{ollama.active_model}</code></div>)}
@@ -248,8 +266,11 @@ export default function LocalModelSection({ notify, onChanged, tick }: Props) {
         <h3>本地 GGUF 导入</h3>
         <p className="muted small">全断网保底：选择本地 .gguf 权重文件导入为 Ollama 模型（隐藏窗执行）。</p>
         <div className="param-row"><span>GGUF 路径</span>
-          <input value={ggufPath} placeholder="C:\models\qwen2.5-7b-q4.gguf"
-                 onChange={(e) => setGgufPath(e.target.value)} /></div>
+          <span className="controls">
+            <input value={ggufPath} placeholder="C:\\models\\qwen2.5-7b-q4.gguf"
+                   onChange={(e) => setGgufPath(e.target.value)} />
+            <button onClick={browseGguf}>浏览</button>
+          </span></div>
         <div className="param-row"><span>命名为</span>
           <span className="controls">
             <input value={ggufName} placeholder="my-qwen:7b"

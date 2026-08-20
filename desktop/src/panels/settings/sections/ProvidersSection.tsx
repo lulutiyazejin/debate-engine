@@ -2,6 +2,7 @@
 // 内置服务商卡（Key/换模型/连通测试）+ 自定义服务商（OpenAI 兼容）。
 import { useState } from "react";
 import { api } from "../../../api";
+import { askConfirm } from "../../../components/AppDialog";
 import type { TaskRow } from "./TasksSection";
 
 export interface Provider { name: string; configured: boolean; available: boolean; model?: string }
@@ -47,7 +48,7 @@ export default function ProvidersSection({ providers, tasks, customs,
   };
 
   const removeKey = async (provider: string) => {
-    if (!window.confirm(`移除 ${provider} 的 Key？`)) return;
+    if (!(await askConfirm({ title: `移除 ${provider} 的 Key？`, danger: true }))) return;
     try { await api.del(`/api/config/key/${provider}`); notify("已移除"); onChanged(); }
     catch (e) { notify(`移除失败: ${e}`); }
   };
@@ -98,7 +99,8 @@ export default function ProvidersSection({ providers, tasks, customs,
   };
 
   const delCustom = async (name: string) => {
-    if (!window.confirm(`移除自定义服务商 ${name}？曾选用它的任务将回落内置默认。`)) return;
+    if (!(await askConfirm({ title: `移除自定义服务商 ${name}？`,
+        body: "曾选用它的任务将回落内置默认。", danger: true }))) return;
     try { await api.del(`/api/config/custom-providers/${name}`); notify("已移除"); onChanged(); }
     catch (e) { notify(`移除失败: ${e}`); }
   };

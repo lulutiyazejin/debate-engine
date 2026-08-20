@@ -79,10 +79,17 @@ class TestProxyTriState:
         assert config.httpx_proxy_for("https://zh.wikipedia.org/x") is None
         assert config.httpx_trust_env_for("https://zh.wikipedia.org/x") is False
 
-    def test_system_mode_trusts_env(self, monkeypatch):
+    def test_system_mode_resolves_registry(self, monkeypatch):
+        """0.1.6 项 1：system 模式不再信环境变量，改解析注册表真实地址；
+        trust_env 统一 False；本地地址仍 bypass。"""
         monkeypatch.setattr(config, "load_settings",
                             lambda: {"proxy": {"mode": "system", "url": ""}})
-        assert config.httpx_trust_env_for("https://api.groq.com/v1") is True
+        monkeypatch.setattr(config, "system_proxy_url",
+                            lambda: "http://127.0.0.1:7890")
+        assert config.httpx_trust_env_for("https://api.groq.com/v1") is False
+        assert (config.httpx_proxy_for("https://api.groq.com/v1")
+                == "http://127.0.0.1:7890")
+        assert config.httpx_proxy_for("http://127.0.0.1:11434/api/tags") is None
 
 
 class TestOllamaAdapter:

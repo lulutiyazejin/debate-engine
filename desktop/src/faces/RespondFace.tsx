@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { api } from "../api";
+import { askConfirm, askInput } from "../components/AppDialog";
 import type { StanceOpt } from "../App";
 import ComparePanel from "../panels/ComparePanel";
 import RebutPanel from "../panels/RebutPanel";
@@ -107,21 +108,22 @@ export default function RespondFace({
   };
 
   const addGroup = async () => {
-    const name = window.prompt("新素材组名称：");
+    const name = await askInput({ title: "新建素材组", placeholder: "组名称" });
     if (!name?.trim()) return;
     try { await api.post("/api/groups", { name: name.trim() }); loadBasket(); }
     catch (e) { notify(`建组失败: ${e}`); }
   };
 
   const renameGroup = async (g: Group) => {
-    const name = window.prompt("组改名：", g.name);
+    const name = await askInput({ title: "组改名", initial: g.name });
     if (!name?.trim() || name.trim() === g.name) return;
     try { await api.patch(`/api/groups/${g.id}`, { name: name.trim() }); loadBasket(); }
     catch (e) { notify(`改名失败: ${e}`); }
   };
 
   const deleteGroup = async (g: Group) => {
-    if (!window.confirm(`删除组「${g.name}」？组内素材不会删除，将并入公共素材组。`)) return;
+    if (!(await askConfirm({ title: `删除组「${g.name}」？`,
+        body: "组内素材不会删除，将并入公共素材组。", danger: true }))) return;
     try {
       const r = await api.del<{ moved: number }>(`/api/groups/${g.id}`);
       notify(`组已删，${r.moved} 条素材并入公共素材组`);
@@ -257,9 +259,10 @@ export default function RespondFace({
             onChange={(k) => { setIntent(k); setHistSel(null); }}
             options={INTENTS.map((it) => ({ key: it.key, label: it.label }))} />
           <div className="spacer" />
-          <button className="fold" onClick={() => setSideOpen(!sideOpen)}
-                  title={sideOpen ? "收起页边注" : "展开页边注"}>
-            {sideOpen ? "⟩" : "⟨"}</button>
+          {/* 0.1.6 项 6：收起态才显弹出钮「<」；收缩钮入页边注内部 */}
+          {!sideOpen && (
+            <button className="fold" onClick={() => setSideOpen(true)}
+                    title="展开页边注">{"<"}</button>)}
         </div>
 
         {histSel ? (
@@ -310,7 +313,10 @@ export default function RespondFace({
       {/* 右栏：页边注（引用/谬误详情） */}
       {sideOpen && (
         <aside className="resp-right marginalia">
-          <div className="col-head">{side?.title || "页边注"}</div>
+          <div className="col-head side-head">{side?.title || "页边注"}
+            <button className="fold" onClick={() => setSideOpen(false)}
+                    title="收起页边注">{">"}</button>
+          </div>
           <div className="side-body">
             {side?.body || <div className="muted pad small">生成后，引用来源与质量度量会作为页边注显示在这里。</div>}
           </div>

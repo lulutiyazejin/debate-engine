@@ -10,10 +10,11 @@ export interface NdjsonEvent {
 
 export async function ndjsonPost(
   path: string, body: unknown, onEvent: (evt: NdjsonEvent) => void,
+  signal?: AbortSignal,   // 0.1.6 项 10：暂停/取消断流（后端客户端断开自停生成器）
 ): Promise<void> {
   const r = await fetch(`${engineBase()}${path}`, {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body ?? {}),
+    body: JSON.stringify(body ?? {}), signal,
   });
   if (!r.ok) {
     const detail = (await r.json().catch(() => null))?.detail || r.status;

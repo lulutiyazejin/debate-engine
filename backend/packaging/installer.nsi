@@ -9,7 +9,7 @@ Unicode true
 
 !define APP_NAME "Debate Engine"
 !define APP_ID "DebateEngine"
-!define APP_VERSION "0.1.5"
+!define APP_VERSION "0.1.6"
 !define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_ID}"
 
 Name "${APP_NAME} ${APP_VERSION}"
@@ -197,6 +197,13 @@ SectionEnd
 
 Section /o "un.同时删除知识库数据（已导入文档、索引与日志）" UnSecData
     RMDir /r "$INSTDIR\knowledge_base"
+    RMDir "$INSTDIR"
+SectionEnd
+
+; 0.1.6 项 11：组件/模型独立文件夹——安装/升级不触碰，卸载默认保留，勾选才删
+Section /o "un.同时删除已下载组件与模型（components / models）" UnSecComp
+    RMDir /r "$INSTDIR\components"
+    RMDir /r "$INSTDIR\models"
     RMDir "$INSTDIR"
 SectionEnd
 

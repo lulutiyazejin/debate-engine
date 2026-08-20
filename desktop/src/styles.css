@@ -95,11 +95,11 @@ code { background: var(--bg-2); padding: 0 4px; border-radius: 4px; font-size: v
 .face { width: 50%; height: 100%; overflow: hidden; }
 .face[aria-hidden="true"] { visibility: hidden; }
 
-/* 覆盖浮层（设置/命令面板/导览共用底） */
+/* 覆盖浮层（设置/导览/弹窗共用底）—0.1.6 项 13：水平+垂直双居中 */
 .overlay { position: fixed; inset: 0; background: var(--bg-overlay);
-  z-index: 80; display: flex; align-items: flex-start; justify-content: center; }
+  z-index: 80; display: flex; align-items: center; justify-content: center; }
 .overlay-card { background: var(--bg-1); width: min(1080px, 94vw);
-  height: min(760px, 92vh); margin-top: 4vh; border-radius: 10px;
+  height: min(760px, 92vh); border-radius: 10px;
   border: 1px solid var(--hairline); display: flex; flex-direction: column;
   overflow: hidden; }
 .overlay-head { display: flex; justify-content: space-between; align-items: center;
@@ -110,18 +110,21 @@ code { background: var(--bg-2); padding: 0 4px; border-radius: 4px; font-size: v
 
 /* 0.1.5 H1：任务分工编号槽 */
 .slot-table { display: flex; flex-direction: column; gap: var(--sp-2); }
-.slot-row { display: flex; align-items: center; gap: var(--sp-3);
-  min-height: 40px; flex-wrap: wrap; }
+/* 0.1.6 项 12：任务分工改两列等宽 grid，select 撑满格不随内容变宽 */
+.slot-row { display: flex; align-items: flex-start; gap: var(--sp-3);
+  min-height: 40px; }
 .slot-task { display: inline-flex; align-items: baseline; gap: var(--sp-2);
-  min-width: 220px; }
+  min-width: 220px; padding-top: 6px; }
 .slot-task em { font-style: normal; color: var(--tx-2); font-size: var(--fs-12); }
-.slot-group { display: inline-flex; align-items: center; gap: var(--sp-2);
-  flex-wrap: wrap; }
-.slot-cell { display: inline-flex; align-items: center; gap: 4px; }
-.slot-cell b { color: var(--accent); font-size: var(--fs-12); }
-.slot-x { padding: 0 6px; color: var(--tx-3); }
+.slot-group { display: grid; grid-template-columns: repeat(2, 1fr);
+  gap: var(--sp-2); flex: 1; min-width: 0; }
+.slot-cell { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.slot-cell select { flex: 1; width: 100%; min-width: 0; }
+.slot-cell b { color: var(--accent); font-size: var(--fs-12); width: 1.2em; }
+.slot-x { padding: 0 6px; color: var(--tx-3); width: 28px; flex: none; }
 .slot-x:hover:not(:disabled) { color: var(--danger); }
-.slot-add { padding: 0 8px; color: var(--tx-3); }
+.slot-add { padding: 0 8px; color: var(--tx-3); width: 28px;
+  justify-self: start; }
 .slot-add:hover { color: var(--accent); }
 
 /* 0.1.5 F1/F2/H2：本地模型分区 */
@@ -625,6 +628,17 @@ mark.hl { background: none; color: var(--accent); font-weight: 600; }
 .viz-canvas { flex: 1; min-height: 0; overflow: hidden; position: relative;
   display: flex; align-items: stretch; justify-content: center; }
 .viz-cube { background: var(--canvas-bg, var(--bg-2)); }
+/* 0.1.6 项 5：自绘立方画布/悬停提示/轴色控件 */
+.cube-cv { display: block; width: 100%; height: 100%; cursor: grab; }
+.cube-cv:active { cursor: grabbing; }
+.cube-tip { position: absolute; pointer-events: none; z-index: 5;
+  background: var(--bg-3); color: var(--tx-1); padding: 4px 10px;
+  border-radius: 4px; font-size: var(--fs-12); max-width: 420px;
+  border: 1px solid var(--hairline-strong); }
+.cube-col { display: inline-flex; align-items: center; gap: 6px; }
+.cube-col input[type="color"] { width: 28px; height: 22px; padding: 0;
+  border: 1px solid var(--hairline); border-radius: 4px; background: none; }
+.cube-col input[type="range"] { width: 90px; }
 .viz-nogl { margin: var(--sp-2) 14px; padding: var(--sp-2) var(--sp-3);
   border: 1px solid var(--warn); border-radius: 6px;
   color: var(--warn); font-size: var(--fs-12); }
@@ -649,4 +663,28 @@ mark.hl { background: none; color: var(--accent); font-weight: 600; }
   white-space: nowrap; }
 .xtab-table .xtab-total { color: var(--tx-3); }
 .heat-table th { font-size: 10px; min-width: 40px; }
+
+/* 0.1.6 项 5：自定义弹窗（替换原生 prompt/confirm，纸感同族） */
+.dlg-overlay { z-index: 120; }
+.dlg-card { background: var(--bg-1); border: 1px solid var(--hairline);
+  border-radius: 10px; width: min(420px, 90vw); padding: var(--sp-4);
+  display: flex; flex-direction: column; gap: var(--sp-3); }
+.dlg-title { font-size: var(--fs-15); font-weight: 600; }
+.dlg-body { color: var(--tx-2); font-size: var(--fs-13);
+  white-space: pre-wrap; line-height: 1.6; }
+.dlg-card input { width: 100%; }
+.dlg-actions { display: flex; justify-content: flex-end; gap: var(--sp-2); }
+.dlg-actions .danger-btn { border-color: var(--danger); color: var(--danger); }
+
+/* 0.1.6 项 4：右键滑动手势提示条（松开才切） */
+.gesture-hint { position: fixed; top: 48px; left: 50%;
+  transform: translateX(-50%); z-index: 90;
+  background: var(--bg-1); border: 1px solid var(--hairline);
+  border-radius: 999px; padding: 4px 14px;
+  font-size: var(--fs-12); color: var(--tx-2); pointer-events: none; }
+
+/* 0.1.6 项 6：页边注头部——收缩钮「>」住进面板内部右侧 */
+.side-head { display: flex; justify-content: space-between;
+  align-items: center; }
+
 
