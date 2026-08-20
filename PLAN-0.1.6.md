@@ -190,3 +190,11 @@
 - settings.py /config/paths +components_dir/models_dir；SettingsPanel 软件信息 +组件/模型目录两行。
 - installer.nsi：安装只覆盖 engine\，两新目录升级天然不触碰；+卸载可选段 UnSecComp（默认保留）。
 - 编译：tsc 0 错误（修一处 ref 类型收窄）；pytest 77 passed。
+
+### 批 6 · 收尾（完成，组件资产上传按红线终止）
+- 版本五处同步 0.1.6：package.json/Cargo.toml/tauri.conf.json/config.py VERSION/installer.nsi。
+- 打包三件：tauri.cmd build --no-bundle（cargo 补 PATH）→ PyInstaller onedir → makensis，release\DebateEngine-0.1.6-Setup.exe 117.6MB。
+- Z 盘静默装后实拍：health version=0.1.6；/api/config/paths 组件/模型目录落 Z:\DebateEngine\components|models（项 11 冻结路径解析正确）；ui-prefs PATCH/GET 往返正常（本地旧偏好一次性迁移生效）；shot-016-boot.png 实拍 3D 立方自绘（渐变场/内壁方格/轴名/立场小立方+常显标签/控件条全在）。
+- GitHub 源码上传：push main（e64bca8..72ee448）✓；tag v0.1.6 ✓；Release v0.1.6 带变更说明 ✓（id 373916843）。
+- components-v1 资产（ocr/docling zip）：本地构建 ocr-win64.zip 107MB；上传连续 5 次失败（代理断大文件 POST，curl 56 schannel close_notify；直连则吊销检查不过）→ 按用户红线终止，留待手动上传；release 页 starter 残包已随失败轮次清理。
+- 编译：pytest 77 passed；tsc 0 错误。
