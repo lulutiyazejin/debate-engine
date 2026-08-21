@@ -318,7 +318,8 @@ def patch_web_enrich(req: WebEnrichPatch):
 @router.get("/config/ollama/status")
 def ollama_status():
     """探测 Ollama：运行状态 / 已装模型 / 矩阵候选卡（G2）/ 下载通道（F3b）/
-    运行时版本比对（不兼容标升级）/ 硬件推荐徽标（H2）。"""
+    运行时版本比对（不兼容标升级）/ 硬件推荐徽标（H2）。
+    0.1.6 hotfix：+has_binary（本机是否有二进制，区分未安装 vs 已安装未启动）。"""
     from ingestion import ollama_adapter as oa
     from models import model_matrix as mm
     running = oa.is_installed()
@@ -344,6 +345,7 @@ def ollama_status():
             "active_model": active,
             "version": version,
             "channel": oa.download_channel(),
+            "has_binary": oa.has_ollama_binary(),
             "candidates": cands}
 
 
@@ -354,7 +356,7 @@ class OllamaPull(BaseModel):
 @router.post("/config/ollama/pull")
 def ollama_pull(req: OllamaPull):
     """一键 pull：NDJSON 流式进度；完成即写 provider_models 热生效
-    （决策13：下载立即生效，零手工配置）。"""
+    （决策 13：下载立即生效，零手工配置）。"""
     from fastapi.responses import StreamingResponse
     from ingestion import ollama_adapter as oa
 
@@ -370,9 +372,23 @@ def ollama_pull(req: OllamaPull):
             overrides = config.load_settings().get("provider_models") or {}
             overrides["ollama"] = req.name
             config.save_settings({"provider_models": overrides})
-            reset_router()   # 任务落点表 10 秒内可见新模型（验收红线6）
+            reset_router()   # 任务落点表 10 秒内可见新模型（验收红线 6）
         yield _json.dumps(final, ensure_ascii=False) + "\n"
 
+    return StreamingResponse(_stream(), media_type="application/x-ndjson")
+
+
+@router.post("/config/ollama/install-runtime")
+def ollama_install_runtime():
+    """0.1.6 hotfix：Ollama 运行时一键装（官方安装包·代理三态·静默），
+    装完由前端接一键启动。"""
+    from fastapi.responses import StreamingResponse
+    from ingestion import ollama_adapter as oa
+    import json as _json
+
+    def _stream():
+        for evt in oa.install_runtime_stream():
+            yield _json.dumps(evt, ensure_ascii=False) + "\n"
     return StreamingResponse(_stream(), media_type="application/x-ndjson")
 
 

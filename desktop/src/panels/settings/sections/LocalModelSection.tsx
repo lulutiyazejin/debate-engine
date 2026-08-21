@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api, engineBase } from "../../../api";
+import { ndjsonPost } from "../../../lib/ndjson";
 
 export interface Candidate {
   name: string; label: string; vram_gb: number; window: number;
@@ -15,6 +16,7 @@ export interface OllamaStatus {
   running: boolean; hint?: string; installed_models: string[];
   active_model?: string; version?: string | null;
   channel?: { mode: string; detail: string };
+  has_binary?: boolean;
   candidates: Candidate[];
 }
 interface Hardware {
@@ -42,6 +44,10 @@ export default function LocalModelSection({ notify, onChanged, tick }: Props) {
   const [pulling, setPulling] = useState("");
   const [pullPct, setPullPct] = useState(0);
   const [pullMsg, setPullMsg] = useState("");
+  // 0.1.6 hotfix：runtime 一键装（官方包+代理三态）
+  const [installing, setInstalling] = useState("");
+  const [instPct, setInstPct] = useState(0);
+  const [instMsg, setInstMsg] = useState("");
   const [freeName, setFreeName] = useState("");
   const [serving, setServing] = useState(false);
   const [ggufPath, setGgufPath] = useState("");
@@ -96,15 +102,33 @@ export default function LocalModelSection({ notify, onChanged, tick }: Props) {
     finally { setPulling(""); refreshAll(0); onChanged(); }
   };
 
-  // F3b：一键启动（隐藏窗+代理注入）
+  // F3b：一键启动（隐藏窗 + 代理注入）
   const serve = async () => {
     setServing(true);
     try {
       const r = await api.post<{ ok: boolean; detail: string }>(
         "/api/config/ollama/serve", {});
       notify(r.detail);
-    } catch (e) { notify(`启动失败: ${e}`); }
+    } catch (e) { notify(`启动失败：${e}`); }
     finally { setServing(false); refreshAll(0); onChanged(); }
+  };
+  
+  // 0.1.6 hotfix：runtime 一键装，装完自动拉起
+  const installRuntime = async () => {
+    setInstalling("downloading"); setInstPct(0); setInstMsg("连接中…");
+    try {
+      await ndjsonPost("/api/config/ollama/install-runtime", {}, (evt) => {
+        if (evt.done) {
+          notify(evt.ok ? "Ollama 运行时安装完成，正在自动拉起…"
+                        : `安装失败：${evt.detail}`);
+          if (evt.ok) { serve(); }
+        } else {
+          if (typeof evt.percent === "number") setInstPct(evt.percent);
+          if (evt.status) setInstMsg(evt.status);
+        }
+      });
+    } catch (e) { notify(`安装失败：${e}`); }
+    finally { setInstalling(""); refreshAll(0); onChanged(); }
   };
 
   // F2：档位写入（热生效）
@@ -180,8 +204,23 @@ export default function LocalModelSection({ notify, onChanged, tick }: Props) {
             <span className={"badge " + (ollama.running ? "ok" : "warn")}>
               {ollama.running ? `运行中${ollama.version ? ` v${ollama.version}` : ""}` : "未运行"}</span>
             {!ollama.running && (
-              <button style={{ marginLeft: 8 }} disabled={serving} onClick={serve}>
-                {serving ? "启动中…" : "一键启动"}</button>)}
+              <>
+                {installing === "downloading" ? (
+                  <span style={{ marginLeft: 8, display: "inline-flex", alignItems: "center" }}>
+                    <button className="link">{instMsg || "下载中…"}</button>
+                    <i style={{ width: `${instPct}%`, minWidth: "60px" }} />
+                  </span>
+                ) : (!ollama.has_binary ? (
+                  <>
+                    <button style={{ marginLeft: 8 }} className="primary" onClick={installRuntime}>一键安装（官方包·代理）</button>
+                    <button style={{ marginLeft: 8 }} disabled={serving} onClick={serve}>一键启动</button>
+                  </>
+                ) : null)}
+                {ollama.has_binary && (
+                  <button style={{ marginLeft: 8 }} disabled={serving || installing !== ""} onClick={serve}>
+                    {serving ? "启动中…" : "一键启动"}</button>)}
+              </>
+            )}
           </span></div>
         {!ollama.running && <p className="muted small">{ollama.hint}（「一键启动」会按代理设置注入下载通道，无弹窗）</p>}
         {ollama.channel && (

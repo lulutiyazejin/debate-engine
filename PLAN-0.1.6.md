@@ -198,3 +198,10 @@
 - GitHub æºç ä¸Šä¼ ï¼špush mainï¼ˆe64bca8..72ee448ï¼‰âœ“ï¼›tag v0.1.6 âœ“ï¼›Release v0.1.6 å¸¦å˜æ›´è¯´æ˜Ž âœ“ï¼ˆid 373916843ï¼‰ã€‚
 - components-v1 èµ„äº§ï¼ˆocr/docling zipï¼‰ï¼šæœ¬åœ°æž„å»º ocr-win64.zip 107MBï¼›ä¸Šä¼ è¿žç»­ 5 æ¬¡å¤±è´¥ï¼ˆä»£ç†æ–­å¤§æ–‡ä»¶ POSTï¼Œcurl 56 schannel close_notifyï¼›ç›´è¿žåˆ™åŠé”€æ£€æŸ¥ä¸è¿‡ï¼‰â†’ æŒ‰ç”¨æˆ·çº¢çº¿ç»ˆæ­¢ï¼Œç•™å¾…æ‰‹åŠ¨ä¸Šä¼ ï¼›release é¡µ starter æ®‹åŒ…å·²éšå¤±è´¥è½®æ¬¡æ¸…ç†ã€‚
 - ç¼–è¯‘ï¼špytest 77 passedï¼›tsc 0 é”™è¯¯ã€‚
+
+### ÈÈÐÞ ¡¤ Ollama ÔËÐÐÊ±Ò»¼ü×°£¨¹Ù·½°ü¡¤´úÀíÈýÌ¬£©
+- ¸ùÒò£º¾«Ñ¡Ä£ÐÍ¡¸ÏÂÔØ²¢ÆôÓÃ¡¹ÒÀÀµ Ollama ÔËÐÐÊ±£»±¾»úÎ´×°Ê±°´Å¥×°ËÀ£¨0.1.6 hotfix ÒÑ¸ÄÖ¸Òý£©£¬µ«ÈÔÐèÓÃ»§ÊÖ¶¯È¥¹ÙÍø×°¡£
+- ¹æ¸ñ£ººó¶Ë +POST /api/config/ollama/install-runtime£¨NDJSON Á÷£©£ºhttpx.stream À­ https://ollama.com/download/OllamaSetup.exe£¨´úÀíÈýÌ¬ httpx_proxy_for£©£¬.part Ðø´«£¬Inno ¾²Ä¬ /VERYSILENT Ãâ¹ÜÀíÔ±Òþ²Ø´°£»ollama_exe_path() Ì½ PATH+LOCALAPPDATA\Programs\Ollama£¨°²×°³ÌÐòÐ´×¢²á±í PATH µ±Ç°½ø³Ì²»¿É¼û£©¡£status +has_binary¡£
+- Ç°¶Ë£ºLocalModelSection ÔËÐÐ×´Ì¬ÐÐ£¬Î´×°Ê±ÏÔ¡¸Ò»¼ü°²×°£¨¹Ù·½°ü¡¤´úÀí£©¡¹primary Å¥+½ø¶ÈÌõ£¬×°Íê×Ô¶¯ serve()¡£
+- Êµ²â£ºsystem ´úÀíÏÂÁ÷Ê½½ø¶ÈÊÂ¼þÕý³££¨0¡ú7.8%£©£¬¹Ù·½Ô´¾­´úÀí¿É´ï¡£
+- ±àÒë£ºtsc 0 ´íÎó£»pytest È«ÂÌ£»ÖØ×° Z: ÑéÖ¤ health 0.1.6¡£

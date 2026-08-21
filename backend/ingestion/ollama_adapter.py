@@ -37,26 +37,25 @@ def is_installed() -> bool:
     return bool(j and isinstance(j, dict) and "models" in j)
 
 
+def ollama_exe_path() -> str | None:
+    """0.1.6 hotfix：定位 ollama 可执行文件（PATH + 默认安装目录）。
+    安装程序把 PATH 写注册表，当前进程重启前看不见，故直接探目录。"""
+    import os
+    import shutil
+    cmd = shutil.which("ollama")
+    if cmd:
+        return cmd
+    if sys.platform == "win32":
+        p = (Path(os.environ.get("LOCALAPPDATA", ""))
+             / "Programs" / "Ollama" / "ollama.exe")
+        if p.exists():
+            return str(p)
+    return None
+
+
 def has_ollama_binary() -> bool:
     """检查本地是否有 ollama 可执行文件。"""
-    # Windows: PATH +常见位置；macOS/Linux: /usr/local/bin
-    candidates = ["ollama"] + [
-        "/opt/homebrew/bin/ollama",
-        "/usr/local/bin/ollama",
-        f"{config.KNOWLEDGE_BASE_PATH}/bin/ollama.exe" if sys.platform == "win32" else None
-    ]
-    for p in candidates:
-        if not p:
-            continue
-        try:
-            import subprocess
-            import shutil
-            cmd = shutil.which(p or "ollama")
-            if cmd and Path(cmd).exists():
-                return True
-        except Exception:
-            pass
-    return False
+    return ollama_exe_path() is not None
 
 
 def ensure_ollama_started() -> tuple[bool, str]:
@@ -122,7 +121,7 @@ def serve_start() -> tuple[bool, str]:
     import time
     if is_installed():
         return True, "Ollama 已在运行（若需代理下载，请先退出它再由本软件拉起）"
-    exe = shutil.which("ollama")
+    exe = ollama_exe_path()
     if not exe:
         return False, "未找到 ollama 可执行文件，请先安装：https://ollama.ai/download"
     env = dict(os.environ)
@@ -151,6 +150,49 @@ def serve_start() -> tuple[bool, str]:
             ch = download_channel()
             return True, f"Ollama 已启动（下载通道：{ch['detail']}）"
     return False, "已拉起但 10 秒内未就绪，请稍后刷新状态"
+
+
+OLLAMA_SETUP_URL = "https://ollama.com/download/OllamaSetup.exe"
+
+
+def install_runtime_stream():
+    """0.1.6 hotfix：Ollama 运行时一键装——官方安装包走代理三态下载，
+    Inno 静默安装（免管理员、隐藏窗）；装完由前端接一键启动。"""
+    import subprocess
+    import tempfile
+    import httpx
+    url = OLLAMA_SETUP_URL
+    tmp = Path(tempfile.gettempdir()) / "OllamaSetup.exe"
+    try:
+        if not (tmp.exists() and tmp.stat().st_size > 1 << 20):
+            yield {"status": "下载官方安装包…", "percent": 0}
+            with httpx.stream("GET", url, proxy=config.httpx_proxy_for(url),
+                              trust_env=config.httpx_trust_env_for(url),
+                              follow_redirects=True, timeout=120) as r:
+                r.raise_for_status()
+                total = int(r.headers.get("content-length") or 0)
+                done = 0
+                part = tmp.with_name(tmp.name + ".part")
+                with open(part, "wb") as f:
+                    for blk in r.iter_bytes(1 << 20):
+                        f.write(blk)
+                        done += len(blk)
+                        if total:
+                            yield {"percent": round(done * 100 / total, 1)}
+                part.replace(tmp)
+        yield {"status": "静默安装中（无弹窗）…", "percent": 100}
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        p = subprocess.run([str(tmp), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"],
+                           creationflags=flags, timeout=900,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if p.returncode != 0:
+            yield {"done": True, "ok": False,
+                   "detail": f"安装程序返回码 {p.returncode}"}
+            return
+        yield {"done": True, "ok": True,
+               "detail": "Ollama 运行时安装完成，正在自动拉起"}
+    except Exception as e:
+        yield {"done": True, "ok": False, "detail": f"{url} → {e}"}
 
 
 def import_gguf(path: str, name: str) -> tuple[bool, str]:
