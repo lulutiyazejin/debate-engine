@@ -205,4 +205,6 @@
 - 服务端搬运：+.github/workflows/mirror-assets.yml（workflow_dispatch）：runner 从 PyPI 官方 pip download 打 ocr/docling zip 传 components-v1（docling 用 cpu torch 索引控体积）；bge-m3 从 HF 官方拉 10 件，pytorch_model.bin 2.27GB 超单资产 2GiB → split 1900M 分片传 bge-m3-v1。全程不经本机。
 - 搬运实测：首轮两 job 挂（gh 无 checkout 上下文→-R 修复）；次轮 components 成、bge-m3 挂（gh 「file#name」的 # 是 label 不是 name→cp 改名修复）；三轮全绿：components-v1 得 ocr 98MB/docling 316MB，bge-m3-v1 得 11 件含 part_aa 1900MB+part_ab 266MB。
 - docling 装后实测：软件内 /api/components/docling/install 全链路 done ok=true（5MB/s，装完热生效）——组件下载三件（ocr/docling/bge-m3）全部可用。
+- 热修4·安装包多源续传：OLLAMA_SETUP_URLS=[GitHub latest/download（主，实测稳）, ollama.com（备）]；.part 断点续传跨源跨次生效（Range，206 判定，不支持则从头）；掐线换源×6 轮；本地完整包跳过下载；单飞锁防并发双写 .part（hotfix4b，实测探针并发暴露后修）；前端 guard toast 剪短。
+- 实测：续传事件「断点续传（已存 170MB）→GitHub源 184/1492MB」；干净全量后台跑至 288MB 稳步增长。
 - 编译：tsc 0 错误；pytest 77 passed；重装 Z: 验证。
