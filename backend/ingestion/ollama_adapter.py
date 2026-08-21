@@ -152,34 +152,69 @@ def serve_start() -> tuple[bool, str]:
     return False, "已拉起但 10 秒内未就绪，请稍后刷新状态"
 
 
-OLLAMA_SETUP_URL = "https://ollama.com/download/OllamaSetup.exe"
+# 0.1.6 hotfix2：安装包多源——GitHub 官方 Release 实测比 ollama.com CDN 稳
+#（代理对大文件转发不稳，GitHub 资产 316MB 实测稳过）；latest/download 免追版本号。
+OLLAMA_SETUP_URLS = [
+    "https://github.com/ollama/ollama/releases/latest/download/OllamaSetup.exe",
+    "https://ollama.com/download/OllamaSetup.exe",
+]
 
 
 def install_runtime_stream():
-    """0.1.6 hotfix：Ollama 运行时一键装——官方安装包走代理三态下载，
+    """0.1.6 hotfix2：Ollama 运行时一键装——多源轮换+断点续传：
+    掐线不从头来，.part 保留换源接着下；本地已有完整包则跳过下载；
     Inno 静默安装（免管理员、隐藏窗）；装完由前端接一键启动。"""
     import subprocess
     import tempfile
     import httpx
-    url = OLLAMA_SETUP_URL
     tmp = Path(tempfile.gettempdir()) / "OllamaSetup.exe"
+    part = tmp.with_name(tmp.name + ".part")
+    last_url = OLLAMA_SETUP_URLS[0]
     try:
         if not (tmp.exists() and tmp.stat().st_size > 1 << 20):
-            yield {"status": "下载官方安装包…", "percent": 0}
-            with httpx.stream("GET", url, proxy=config.httpx_proxy_for(url),
-                              trust_env=config.httpx_trust_env_for(url),
-                              follow_redirects=True, timeout=120) as r:
-                r.raise_for_status()
-                total = int(r.headers.get("content-length") or 0)
-                done = 0
-                part = tmp.with_name(tmp.name + ".part")
-                with open(part, "wb") as f:
-                    for blk in r.iter_bytes(1 << 20):
-                        f.write(blk)
-                        done += len(blk)
-                        if total:
-                            yield {"percent": round(done * 100 / total, 1)}
-                part.replace(tmp)
+            done = part.stat().st_size if part.exists() else 0
+            if done:
+                yield {"status": f"断点续传（已存 {done // 1048576}MB）…",
+                       "percent": 0}
+            total_known = 0
+            finished = False
+            last_err = ""
+            for attempt in range(6):   # 两源轮换×3 轮，全程续传
+                url = last_url = OLLAMA_SETUP_URLS[attempt % len(OLLAMA_SETUP_URLS)]
+                try:
+                    headers = {"Range": f"bytes={done}-"} if done else {}
+                    with httpx.stream("GET", url, headers=headers,
+                                      proxy=config.httpx_proxy_for(url),
+                                      trust_env=config.httpx_trust_env_for(url),
+                                      follow_redirects=True, timeout=120) as r:
+                        r.raise_for_status()
+                        if done and r.status_code == 200:
+                            done = 0   # 该源不支持续传，从头
+                            open(part, "wb").close()
+                        total_known = (int(r.headers.get("content-length") or 0)
+                                       + done) or total_known
+                        src = "GitHub" if "github.com" in url else "官网"
+                        with open(part, "ab") as f:
+                            for blk in r.iter_bytes(1 << 20):
+                                f.write(blk)
+                                done += len(blk)
+                                if total_known and done % (8 << 20) < (1 << 20):
+                                    yield {"percent": round(done * 100 / total_known, 1),
+                                           "status": f"{src}源 {done // 1048576}/"
+                                                     f"{total_known // 1048576}MB"}
+                    if not total_known or done >= total_known:
+                        finished = True
+                        break
+                    last_err = f"{url} → 中途断线（已下 {done // 1048576}MB）"
+                except Exception as e:
+                    last_err = f"{url} → {e}"
+                yield {"status": f"断线换源续传…（{attempt + 1}/6）"}
+            if not finished:
+                yield {"done": True, "ok": False,
+                       "detail": f"下载失败：{last_err}。已下部分保留，"
+                                 f"重试将从断点继续"}
+                return
+            part.replace(tmp)
         yield {"status": "静默安装中（无弹窗）…", "percent": 100}
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         p = subprocess.run([str(tmp), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"],
@@ -192,7 +227,7 @@ def install_runtime_stream():
         yield {"done": True, "ok": True,
                "detail": "Ollama 运行时安装完成，正在自动拉起"}
     except Exception as e:
-        yield {"done": True, "ok": False, "detail": f"{url} → {e}"}
+        yield {"done": True, "ok": False, "detail": f"{last_url} → {e}"}
 
 
 def import_gguf(path: str, name: str) -> tuple[bool, str]:

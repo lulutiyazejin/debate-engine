@@ -66,7 +66,7 @@ export default function LocalModelSection({ notify, onChanged, tick }: Props) {
   const pullModel = async (name: string) => {
     // 0.1.6 补：Ollama 未运行时按钮不再装死——点击给明确指引
     if (!ollama?.running) {
-      notify(`Ollama 未运行，先点上方的「一键启动」${ollama?.hint ? `（${ollama.hint}）` : ""}`);
+      notify("Ollama 未运行：先点上方的「一键安装」或「一键启动」，详情见状态行小字");
       return;
     }
     setPulling(name); setPullPct(0); setPullMsg("连接中…");
@@ -164,7 +164,7 @@ export default function LocalModelSection({ notify, onChanged, tick }: Props) {
   const importGguf = async () => {
     if (!ggufPath.trim() || !ggufName.trim()) { notify("请填写 GGUF 路径与模型名"); return; }
     if (!ollama?.running) {
-      notify(`Ollama 未运行，先点上方的「一键启动」${ollama?.hint ? `（${ollama.hint}）` : ""}`);
+      notify("Ollama 未运行：先点上方的「一键安装」或「一键启动」，详情见状态行小字");
       return;
     }
     setImporting(true);
