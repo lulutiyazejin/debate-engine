@@ -49,10 +49,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view components-v1 || \
-            gh release create components-v1 --title "组件资产 components-v1" \
+          R=${{ github.repository }}
+          gh release view components-v1 -R $R || \
+            gh release create components-v1 -R $R --title "组件资产 components-v1" \
               --notes "runner 服务端搬运：ocr/docling win64 wheels 包，解压布局=site-packages 根"
-          gh release upload components-v1 ocr-win64.zip docling-win64.zip --clobber
+          gh release upload components-v1 -R $R ocr-win64.zip docling-win64.zip --clobber
 
   bge-m3:
     if: inputs.job == 'all' || inputs.job == 'bge-m3'
@@ -78,10 +79,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view bge-m3-v1 || \
-            gh release create bge-m3-v1 --title "BGE-M3 镜像 bge-m3-v1" \
+          R=${{ github.repository }}
+          gh release view bge-m3-v1 -R $R || \
+            gh release create bge-m3-v1 -R $R --title "BGE-M3 镜像 bge-m3-v1" \
               --notes "runner 从 HF 官方服务端搬运；pytorch_model.bin 分片 part_*，按序拼接还原"
-          gh release upload bge-m3-v1 \
+          gh release upload bge-m3-v1 -R $R \
             config.json config_sentence_transformers.json modules.json \
             sentence_bert_config.json special_tokens_map.json tokenizer_config.json \
             sentencepiece.bpe.model tokenizer.json \
