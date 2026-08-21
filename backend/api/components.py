@@ -328,15 +328,14 @@ def _find_system_python() -> str | None:
 
 
 def _has_nvidia_gpu() -> bool:
-    """nvidia-smi 能跑通即认为有 N 卡（cu121 轮子可用）。"""
+    """nvidia-smi 能跑通即认为有 N 卡（cu121 轮子可用）。
+    补丁：不用 CREATE_NO_WINDOW（会干扰输出捕获）。"""
     import shutil as _sh
     import subprocess as _sp
     if not _sh.which("nvidia-smi"):
         return False
     try:
-        flags = getattr(_sp, "CREATE_NO_WINDOW", 0)
-        r = _sp.run(["nvidia-smi", "-L"], capture_output=True, timeout=10,
-                    creationflags=flags)
+        r = _sp.run(["nvidia-smi", "-L"], capture_output=True, timeout=10)
         return r.returncode == 0 and b"GPU" in r.stdout
     except Exception:
         return False
