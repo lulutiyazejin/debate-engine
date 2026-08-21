@@ -1,13 +1,14 @@
 # 0.1.6 热修：服务端搬运——GitHub runner 直接从官方源下载并上传 Release 资产，
 # 全程不经用户本机（本机上行网络会掐大文件 POST）。
-# 触发：Actions 页手动 Run workflow，可选 job=all|components|bge-m3。
+# 0.1.6 补丁项 4：同步上传到魔搭仓库（国内直连 37MB/s），需 Secret MODELSCOPE_TOKEN。
+# 触发：Actions 页手动 Run workflow，可选 job=all|components|bge-m3|ollama-setup。
 name: mirror-assets
 
 on:
   workflow_dispatch:
     inputs:
       job:
-        description: "all | components | bge-m3"
+        description: "all | components | bge-m3 | ollama-setup"
         required: false
         default: "all"
 
@@ -54,6 +55,38 @@ jobs:
             gh release create components-v1 -R $R --title "组件资产 components-v1" \
               --notes "runner 服务端搬运：ocr/docling win64 wheels 包，解压布局=site-packages 根"
           gh release upload components-v1 -R $R ocr-win64.zip docling-win64.zip --clobber
+
+      # 0.1.6 补丁项 4：同步上传魔搭（国内用户直连主源）
+      - name: upload to ModelScope
+        run: |
+          pip install -q modelscope
+          modelscope upload lulutiyazejin/debate-engine-components \
+            ocr-win64.zip ocr-win64.zip \
+            --token "${{ secrets.MODELSCOPE_TOKEN }}" --commit-message "mirror ocr"
+          modelscope upload lulutiyazejin/debate-engine-components \
+            docling-win64.zip docling-win64.zip \
+            --token "${{ secrets.MODELSCOPE_TOKEN }}" --commit-message "mirror docling"
+
+  ollama-setup:
+    if: inputs.job == 'all' || inputs.job == 'ollama-setup'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: download OllamaSetup.exe from GitHub official
+        run: |
+          curl -fL https://github.com/ollama/ollama/releases/latest/download/OllamaSetup.exe \
+            -o OllamaSetup.exe
+          ls -la OllamaSetup.exe
+
+      - name: upload to ModelScope
+        run: |
+          pip install -q modelscope
+          modelscope upload lulutiyazejin/debate-engine-components \
+            OllamaSetup.exe OllamaSetup.exe \
+            --token "${{ secrets.MODELSCOPE_TOKEN }}" --commit-message "mirror OllamaSetup"
 
   bge-m3:
     if: inputs.job == 'all' || inputs.job == 'bge-m3'

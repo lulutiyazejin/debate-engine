@@ -137,6 +137,8 @@ def serve_start() -> tuple[bool, str]:
         sp = config.system_proxy_url()
         if sp:
             env["HTTPS_PROXY"] = sp
+    # 0.1.6 补丁项 1：魔搭直连不过代理（37MB/s），官方源照旧走代理
+    env["NO_PROXY"] = "modelscope.cn,localhost,127.0.0.1"
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     try:
         _SERVE_PROC = subprocess.Popen([exe, "serve"], env=env,
@@ -153,9 +155,11 @@ def serve_start() -> tuple[bool, str]:
     return False, "已拉起但 10 秒内未就绪，请稍后刷新状态"
 
 
-# 0.1.6 hotfix2：安装包多源——GitHub 官方 Release 实测比 ollama.com CDN 稳
+# 0.1.6 hotfix2/补丁项 2：安装包多源——GitHub 官方 Release 实测比 ollama.com CDN 稳
 #（代理对大文件转发不稳，GitHub 资产 316MB 实测稳过）；latest/download 免追版本号。
+# 补丁项 2：首源改用户魔搭仓库（不经代理，37MB/s），顺序 [魔搭，GitHub, ollama.com]
 OLLAMA_SETUP_URLS = [
+    "https://modelscope.cn/models/lulutiyazejin/debate-engine-components/resolve/master/OllamaSetup.exe",
     "https://github.com/ollama/ollama/releases/latest/download/OllamaSetup.exe",
     "https://ollama.com/download/OllamaSetup.exe",
 ]
@@ -173,14 +177,16 @@ def _runtime_emit(obj: dict) -> None:
 
 
 def _install_runtime_worker() -> None:
-    """后台线程体：多源轮换+断点续传下载 → Inno 静默安装（免管理员、隐藏窗）。
+    """后台线程体：多源轮换 + 断点续传下载 → Inno 静默安装（免管理员、隐藏窗）。
     重试按进展计：单次尝试新增≥1MB 即清零计数，仅连续 6 次零进展才判失败
     （1.46GB 慢代理源掐线多次也能磨完，不再被固定 6 次冤杀）。"""
     import subprocess
     import tempfile
     import httpx
+    import json
     tmp = Path(tempfile.gettempdir()) / "OllamaSetup.exe"
     part = tmp.with_name(tmp.name + ".part")
+    meta = tmp.with_name(tmp.name + ".part.meta")
     last_url = OLLAMA_SETUP_URLS[0]
     try:
         if not (tmp.exists() and tmp.stat().st_size > 1 << 20):
@@ -188,6 +194,16 @@ def _install_runtime_worker() -> None:
             if done:
                 _runtime_emit({"status": f"断点续传（已存 {done // 1048576}MB）…",
                                "percent": 0})
+            # 补丁项 3b：读取.meta 记录总长和源 URL
+            expected_total = 0
+            expected_url = ""
+            if meta.exists():
+                try:
+                    j = json.loads(meta.read_text(encoding="utf-8"))
+                    expected_total = int(j.get("total", 0) or 0)
+                    expected_url = str(j.get("url", "") or "")
+                except Exception:
+                    pass
             total_known = 0
             finished = False
             last_err = ""
@@ -197,6 +213,16 @@ def _install_runtime_worker() -> None:
                 url = last_url = OLLAMA_SETUP_URLS[idx % len(OLLAMA_SETUP_URLS)]
                 idx += 1
                 start = done
+                # 补丁项 3b：校验元数据
+                if done and (not expected_total or url != expected_url):
+                    # 总长或源变了 → 从头下
+                    _runtime_emit({"status": "源变更清 .part 从头下载…"})
+                    done = 0
+                    open(part, "wb").close()
+                    if meta.exists():
+                        meta.unlink()
+                    expected_total = 0
+                    expected_url = ""
                 try:
                     headers = {"Range": f"bytes={done}-"} if done else {}
                     with httpx.stream("GET", url, headers=headers,
@@ -207,8 +233,20 @@ def _install_runtime_worker() -> None:
                         if done and r.status_code == 200:
                             done = 0   # 该源不支持续传，从头
                             open(part, "wb").close()
-                        total_known = (int(r.headers.get("content-length") or 0)
-                                       + done) or total_known
+                        content_range = r.headers.get("content-range", "")
+                        cl = r.headers.get("content-length", "")
+                        if content_range:
+                            # Content-Range: bytes 0-1048575/1564819104
+                            total_from_range = int(content_range.split("/")[-1])
+                        elif cl:
+                            total_from_range = int(cl) + done
+                        else:
+                            total_from_range = 0
+                        if not expected_total and total_from_range > 0:
+                            # 首个有效响应记录
+                            expected_total = total_from_range
+                            expected_url = url
+                        total_known = total_from_range or (int(cl) or 0) + done or total_known
                         src = "GitHub" if "github.com" in url else "官网"
                         with open(part, "ab") as f:
                             for blk in r.iter_bytes(1 << 20):
@@ -232,6 +270,13 @@ def _install_runtime_worker() -> None:
                                "detail": f"下载失败：{last_err}。已下部分保留，"
                                          f"重试将从断点继续"})
                 return
+            # 补丁项 3b：替换前校验大小
+            if done != expected_total:
+                _runtime_emit({"done": True, "ok": False,
+                               "detail": f"文件大小校验失败（期望{expected_total//1048576}MB,实际{done//1048576}MB）"})
+                return
+            # 写入.meta
+            meta.write_text(json.dumps({"total": expected_total, "url": expected_url}, ensure_ascii=False), encoding="utf-8")
             part.replace(tmp)
         _runtime_emit({"status": "静默安装中（无弹窗）…", "percent": 100})
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -239,8 +284,13 @@ def _install_runtime_worker() -> None:
                            creationflags=flags, timeout=900,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if p.returncode != 0:
+            # 补丁项 3a：装失败删 tmp
+            if tmp.exists():
+                tmp.unlink()
+            if meta.exists():
+                meta.unlink()
             _runtime_emit({"done": True, "ok": False,
-                           "detail": f"安装程序返回码 {p.returncode}"})
+                           "detail": f"安装包校验失败已删除，请重试重新下载"})
             return
         _runtime_emit({"done": True, "ok": True,
                        "detail": "Ollama 运行时安装完成，正在自动拉起"})

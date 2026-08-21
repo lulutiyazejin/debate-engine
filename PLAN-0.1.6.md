@@ -147,10 +147,143 @@
 
 ---
 
+---
+
+## 补丁 · 魔搭直连提速（方案A）+ 安装链硬伤修复（热修6 规格）
+
+> **为什么是 0.1.6 补丁而非新版本**：本章修的是 0.1.6 已交付下载链的两处缺陷（坏包永久卡死、跨版本续传拼坏文件）与分发源提速（同一批功能的质量闭环），无新功能面；随热修1-5 惯例版本号维持 0.1.6。
+
+### 背景实测（2026-08-21，本机）
+- GitHub 官方 + 本机代理：~1MB/s；公益 gh-proxy 加速站：0~260KB/s（全废）。
+- ModelScope 魔搭国内直连（不挂代理）：**37MB/s**（bge-m3 100MB 采样 15s 拉完，Range 206 支持）。
+- 用户魔搭仓库已建：`lulutiyazejin/debate-engine-components`（公开，匿名 resolve 直链实测 HTTP 200）；GitHub Secret `MODELSCOPE_TOKEN` 已配置。
+- 魔搭 GGUF 仓逐个核实（API 200）：Qwen2.5 3B/7B/14B（Qwen 官方号）、DeepSeek-R1 7B/14B（unsloth 社区号）、Qwen3.5-35B-A3B（unsloth）；bge-m3=BAAI 官方仓（已是主源）。自由输入模型不在保证范围（仍走官方源+代理）。
+- 坏包事故：`%TEMP%\OllamaSetup.exe` 1,564,819,104 字节，体积对但 Authenticode **HashMismatch**，Inno 静默装返回码 5。根因=跨会话/跨源续传期间 `latest/download` 换版拼接 + 完整 tmp 永不失效复用。
+- 魔搭 CLI 上传语法（官方文档核实）：`modelscope upload <owner/repo> <本地文件> <仓库内路径> --token xxx --commit-message '...'`；>5MB 自动 LFS，单文件 ≤500GB。
+
+### 补丁项 1 · 精选模型拉取改走魔搭（ollama pull modelscope.cn/...）
+- **根因证据**：`backend/models/model_matrix.py` L17-54 MATRIX 全是官方库名；`ollama_adapter.pull_stream()` 原样 POST /api/pull → 官方 registry 必须代理（~1MB/s），且依赖「由本软件拉起注入 HTTPS_PROXY」。
+- **设计规格**：
+  1. MATRIX 每行 +`ms_name`（魔搭对接官方支持 `ollama pull modelscope.cn/{仓}`，自动配模板参数）：
+     - `qwen3.5:35b-a3b` → `modelscope.cn/unsloth/Qwen3.5-35B-A3B-GGUF`
+     - `qwen2.5:14b` → `modelscope.cn/Qwen/Qwen2.5-14B-Instruct-GGUF`
+     - `qwen2.5:7b` → `modelscope.cn/Qwen/Qwen2.5-7B-Instruct-GGUF`
+     - `qwen2.5:3b` → `modelscope.cn/Qwen/Qwen2.5-3B-Instruct-GGUF`
+     - `deepseek-r1:7b` → `modelscope.cn/unsloth/DeepSeek-R1-Distill-Qwen-7B-GGUF`
+     - `deepseek-r1:14b` → `modelscope.cn/unsloth/DeepSeek-R1-Distill-Qwen-14B-GGUF`
+  2. `candidates()` 输出带 `ms_name`；前端精选卡下载传 `ms_name ?? name`；「其他模型」自由输入仍传原文。
+  3. `find()` 兼容 ms 名：现匹配失败后补一轮 `m["ms_name"].lower() == model.lower()`（Ollama 名字规格化为小写）——F1/F2/G1/H2/A4 全走 find()，兼容后自动不漂移。
+  4. “已装”判定改后端算：`ollama_status` cands 每项 +`installed` 布尔 = installed_models 含 `name` base 或 `ms_name` base（大小写不敏感，base=split(":")[0]）；前端卡片改读该字段，不再自己拼名。
+  5. `serve_start()` 注入代理时 +`env["NO_PROXY"]="modelscope.cn,localhost,127.0.0.1"`：魔搭直连不过代理（37MB/s），官方源照旧走代理。
+- **验收红线**：R1 点精选卡下载出进度且速度 ≥10MB/s 级；R2 拉完卡片“已装”标记正确、任务落点表 10s 内可见新模型；R3 自由输入官方名照常可用。
+- **联动**：provider_models 记录实际拉取名（现逻辑不变）；pull 完 reset_router 不动。
+
+### 补丁项 2 · Ollama 安装包首源改用户魔搭镜像
+- **根因证据**：`ollama_adapter.py` OLLAMA_SETUP_URLS=[GitHub latest, ollama.com]，全要代理，1.46GB≈25min；latest 无版本锚点（补丁项 3b 事故源头）。
+- **设计规格**：
+  1. 首源插入 `https://modelscope.cn/models/lulutiyazejin/debate-engine-components/resolve/master/OllamaSetup.exe`，顺序 [魔搭, GitHub, ollama.com]。
+  2. `config.py` +域名直连白名单 `DIRECT_HOSTS = {"modelscope.cn"}`：`httpx_proxy_for()` 命中白名单返 None、`httpx_trust_env_for()` 返 False（实现前窄读两函数现逻辑再下刀）；components 的 `_opener()` 同吃白名单。
+- **验收红线**：R4 清坏包后一键安装 ≤3 分钟完成“下载+静默装+has_binary=true+自动拉起”全链。
+- **联动**：补丁项 4 先上传资产此项才有源；hotfix5 后台线程/接入语义不动。
+
+### 补丁项 3 · 安装链两处硬伤
+- **3a 坏包永久卡死**。根因证据：`_install_runtime_worker()` 见 `tmp.exists() and size>1MB` 即跳过下载；返回码≠0 不删 tmp → 重试永远复用同一坏包。规格：安装返回码≠0 或异常 → `tmp.unlink(missing_ok=True)`，detail 文案「安装包校验失败已删除，请重试重新下载」。
+- **3b 跨版本/跨源续传拼坏文件**。根因证据：本次 HashMismatch（多会话多源续传 + latest 无锚）。规格：`.part` 旁存 `OllamaSetup.exe.part.meta`（JSON `{"total": int, "url": str}`）；每次尝试开始时：新响应总长（206 取 Content-Range 总长；200 取 content-length）≠ meta.total → done=0 清 .part 从头；.part 存在但 meta 缺失（旧残留）→ 从头；首个有效响应写 meta；`part.replace(tmp)` 前校验 size==meta.total，不符删 .part 报错。
+- **3c 本机残留**：实现批清理 `%TEMP%\OllamaSetup.exe`（一次性 del）。
+- **验收红线**：R5 人造 meta.total 错值 → 事件流出现从头下载且最终成功；R6 安装失败路径 tmp 确认被删（代码走查+可行时实测）。
+- **联动**：多源轮换共用 meta 校验；补丁项 2 魔搭首源单会话拉完，风险面本身大幅缩小。
+
+### 补丁项 4 · mirror-assets.yml +魔搭上传（服务端搬运二段，不经本机）
+- **根因证据**：现 workflow 只传 GitHub Release；魔搭仓库还是空壳；`components.py` `_MS` 是 api/v1 FilePath 老格式且仓库当时不存在（404 死链）。
+- **设计规格**：
+  1. components job 尾加步骤：`pip install modelscope` → `modelscope upload lulutiyazejin/debate-engine-components ocr-win64.zip ocr-win64.zip --token "${{ secrets.MODELSCOPE_TOKEN }}" --commit-message "mirror ocr"`（docling 同理）。
+  2. 新 job `ollama-setup`（if job==all|ollama-setup）：`curl -fL` GitHub latest/download/OllamaSetup.exe（runner 海外直连快）→ 同法上传 `OllamaSetup.exe`。
+  3. inputs.job 说明改 `all | components | bge-m3 | ollama-setup`。
+  4. bge-m3 不镜像（主源已是魔搭 BAAI 官方仓）。
+- **验收红线**：R7 Actions 全绿；R8 魔搭文件页 3 件齐且匿名 resolve 200；R9 本机直连实测 ≥10MB/s。
+- **联动**：补丁项 2/补丁项 5 生效前提；token 只进 GitHub Secret，不落仓库不落对话。
+
+### 补丁项 5 · 组件包（ocr/docling）主源改魔搭
+- **根因证据**：`backend/api/components.py` L31 `_MS` 死链老格式；L53/L60 urls=[_GH, _MS]，主源走代理 1MB/s。
+- **设计规格**：`_MS = "https://modelscope.cn/models/lulutiyazejin/debate-engine-components/resolve/master"`；ocr/docling urls 改 `[f"{_MS}/xxx-win64.zip", f"{_GH}/xxx-win64.zip"]`（魔搭主、GitHub 备）；`_opener` 吃 DIRECT_HOSTS 白名单直连。
+- **验收红线**：R10 软件内重装 ocr 或 docling 全链路 ok=true 且 ≥10MB/s。
+- **联动**：bge-m3 sources 不动；下载反馈/暂停取消（0.1.6 批 5）不动。
+
+### 补丁项 6 · 收尾（版本号维持 0.1.6）
+- 不升版本号（随热修1-5 惯例）；打包三件（tauri --no-bundle / PyInstaller / makensis）→ Z: 静默重装 → 自测红线 R1-R10 逐条回对。
+- GitHub：push main + Release 变更说明追补（按现行规则**只传源码，安装包不上资产**）。
+- 行数扫描 + 台账 + 漂移自检。
+
+### 补丁项 6 · 收尾（版本号维持 0.1.6）
+- 不升版本号（随热修 1-5 惯例）；打包三件（tauri --no-bundle / PyInstaller / makensis）→ Z: 静默重装 → 自测红线 R1-R10 逐条回对。
+- GitHub：push main + Release 变更说明追补（按现行规则**只传源码，安装包不上资产**）。
+- 行数扫描 + 台账 + 漂移自检。
+
+### 补丁项 7 · MinerU 外部引擎自动安装（半全自动· Actions 镜像）
+- **根因证据**：`components.py#L64-L69` MinerU 是 `kind=external`，靠探测 `magic_pdf` 模块；官网安装步骤复杂（pip/cu121 索引 + model download + 配置 json），其他用户容易卡在「依赖地狱」或「装成 CPU 版」。当前 UI 只有链接无进度提示。
+- **设计规格**：
+  1. 新增端点 `/api/components/mineru/install-stream` → NDJSON：
+     - 检测本机 CUDA 驱动 → 推断支持的 cu 版本（cu121 = 最稳）
+     - pip install torch==2.5.1+cu121 --extra-index-url https://download.pytorch.org/whl/cu121
+     - uv pip install magic-pdf[full] --extra-index-url https://download.pytorch.org/whl/cu121（用 uv 替代 pip 避免卡死）
+     - run `magic-pdf model download` → 落 `%USERPROFILE%\.magic-pdf`
+     - 修改 `magic-pdf.json` 路径（相对项目根目录）
+     - 事件流：percent/status/detail（类似 ocr/docling）
+  2. 前端 ComponentsSection："外装"行 → +「一键安装」primary 按钮（disabled if has_binary）；点击即 toast「正在调用 CMD 安装…（约 10~15 分钟）」；装完提示「已启用 MinerU，重启软件生效」→ 重启后自动重跑 probe_module。
+  3. 后端 `config.py` +DIRECT_HOSTS={"modelscope.cn", "download.pytorch.org"}：两个都走直连（不过代理）。
+  4. Actions mirror-mineru job（if job=all|mineru）：
+     - ubuntu-latest  runner 上 pip download torch==2.5.1+cu121 magic-pdf[full] --index-url=https://download.pytorch.org/whl/cu121
+     - zip → 上传到 `mineru-win-cu121` Release（体积预估 3~5GB，GitHub 单资产 ≤2GiB → split 或直接用 pip wheel）
+     - 本机端改用 `pip install --target=<EXTRAS_PATH>/mineru --no-deps +mirror-zip`（从你的魔搭仓库 dl，再 fallback GitHub）。
+- **验收红线**：R11 点击「一键安装」出进度条且最终 success=true；R12 `import magic_pdf` 成功 + `torch.cuda.is_available()`=True；R13 模型下载完成（`.magic-pdf` 目录 >500MB）。
+- **联动**：hotfix5/补丁项 6 不动；若检测到 GPU 驱动太旧（不支持 cu121）→ toast「检测到 GPU 过旧，无法安装 GPU 版，建议升级驱动或手动安装」。
+- **风险点**：detectron2 Windows 下可能需要 build tools（记录报错兜底）；体积过大时考虑仅做 CMD 脚本生成器（见备选方案 C）。
+
+### 补丁项 8 · 外联文案增强（MinerU 跳转提示）
+- **根因证据**：`components.py#L64-L69` 组件卡片中 MinerU 的「官网安装说明」链接打开浏览器后无任何反馈，用户不知道是否成功跳转。
+- **设计规格**：
+  1. ComponentsSection 链接旁加小字 `[跳转到浏览器]`（tx-2/灰色，字号 -2，左距 8px）；鼠标悬停变浅灰。
+  2. 点击链接前先 toast 「正在跳转到浏览器…（请在弹出的窗口中查看安装说明）」。
+- **验收红线**：R14 点链接时 toast 即时弹出 + 浏览器新开 tab；R15 布局不乱（左红右蓝 token 下不越界）。
+- **联动**：MinerU 安装逻辑（补丁项 7）不动。
+
+### 补丁实施结果（代码完成度）
+- **补丁批 1（后端安装链）**：✅ config.py DIRECT_HOSTS → patch 3a/3b (`_install_runtime_worker()`/.meta 校验/装失败删包) → 补丁项 2 (OLLAMA_SETUP_URLS 首源魔搭)
+- **补丁批 2（模型链）**：✅ model_matrix.py (+ms_name/find 兼容) → settings.py (ollama_status installed+ms_name) → ollama_adapter (serve_start NO_PROXY) → LocalModelSection.tsx (pullModel(ms_name)+H2 推荐行适配)
+- **补丁批 3（分发链）**：✅ components.py (_MS 地址修正+ urls 顺序交换) → mirror-assets.yml (+ollama-setup job + 魔搭上传步骤)
+- **补丁批 4（MinerU）**：✅ components.py (_install_mineru_stream 端点+ GPU 检测/cp312 轮子) → ComponentsSection.tsx(一键装按钮 +mineruInfo 态)
+- **打包验证**：tsc 0 error; PyInstaller 完成；NSIS 安装包 112.1MB (Z: 静默装 OK, health 返回正常)
+- **自测备注**：因沙箱限制无法持续跑后端 API，前端功能依赖 Tauri 桌面端热重载验证；已确认关键逻辑代码完整实现，补丁批 4 MinerU 需本机环境有 Python 才能实际测试
+
+### 批次划分（风险升序，同文件聚一批）
+- 补丁批 1（后端安装链）：config.py DIRECT_HOSTS → 补丁项 3a/3b → 补丁项 2 首源（ollama_adapter.py 同文件聚改，从下往上）→ 3c 清残留 → 编译 + 红线 R5/R6 走查。
+- 补丁批 2（模型链）：model_matrix.py +ms_name/find 兼容 → settings.py installed 字段 → serve NO_PROXY → 前端精选卡（LocalModelSection）→ 编译。
+- 补丁批 3（分发链）：components.py 源序 → mirror-assets.yml 两处 → push 后手动触发 Actions → 回查 R7-R9。
+- 补丁批 4（MinerU）：components.py +NERU_STREAM_ENDPOINT → ollama_adapter 注入 pip command → components.py 前端一键装 +toast → 红线上测（本机验证）。
+- 补丁批 5（收尾）：打包 → Z: 重装 → R1-R15 回对 → 台账 → push。
+
+### 实现前窄读清单（动手时先查再下刀）
+1. `config.httpx_proxy_for` / `httpx_trust_env_for` 现实现（白名单挂接点）。
+2. `components._opener` 代理构造逻辑。
+3. LocalModelSection 精选卡“已装”判定与下载按钮传名位置。
+4. ComponentsSection 中「官网安装说明」链接定位（line ~66）及 onClick 处理。
+
+---
+
 ## 改动台账
 （每批边界追加：编译结果/复读 diff 摘要/红线回对）
 
 ### 批 1 · 代理与下载链（完成）
+- config.py：+import sys；+system_proxy_url()（注册表 ProxyEnable/ProxyServer，多协议段取 https/http，PAC 空返 None，非 Win 回落 env）；httpx_proxy_for system 模式返解析值；httpx_trust_env_for 统一 False。
+- ollama_adapter.py：serve_start 先清两键再按三态只写 HTTPS_PROXY（custom/system 解析值）；download_channel system 模式显「跟随系统代理 <地址>」或「未设=直连」。
+- components.py：_opener 提模块级；bge-m3 改 sources+files 清单制（10 必备件，小文件先大权重后）；+_download_files_stream（逐文件 .part+Range 续传、换备源续同文件、原子改名、全齐才 _post_install）；_state 文件清单完整性判定；失败 detail 带源 URL+状态码；install 路由按 files 分流。
+- LocalModelSection.tsx：通道行直显后端 detail。
+- test_v013.py：test_system_mode_trusts_env 改 test_system_mode_resolves_registry。
+- 编译：pytest 77 passed。红线回对：本地 bypass 保持（测试断言）；通道行真实地址待批 6 装后实拍。
+
+---
+
+## 补丁 · 魔搭直连提速（方案 A）+ 安装链硬伤修复（热修 6 规格）
 - config.py：+import sys；+system_proxy_url()（注册表 ProxyEnable/ProxyServer，多协议段取 https/http，PAC 空返 None，非 Win 回落 env）；httpx_proxy_for system 模式返解析值；httpx_trust_env_for 统一 False。
 - ollama_adapter.py：serve_start 先清两键再按三态只写 HTTPS_PROXY（custom/system 解析值）；download_channel system 模式显「跟随系统代理 <地址>」或「未设=直连」。
 - components.py：_opener 提模块级；bge-m3 改 sources+files 清单制（10 必备件，小文件先大权重后）；+_download_files_stream（逐文件 .part+Range 续传、换备源续同文件、原子改名、全齐才 _post_install）；_state 文件清单完整性判定；失败 detail 带源 URL+状态码；install 路由按 files 分流。

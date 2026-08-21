@@ -28,7 +28,8 @@ from models.embedder import embedder_status, get_embedder, reset_embedder
 router = APIRouter(prefix="/api/components", tags=["components"])
 
 _GH = "https://github.com/lulutiyazejin/debate-engine/releases/download/components-v1"
-_MS = "https://modelscope.cn/api/v1/models/lulutiyazejin/debate-engine-components/repo?FilePath"
+# 0.1.6 补丁项 5：魔搭 resolve 直链（实测 37MB/s 直连+206 续传），主源；GitHub 降备源
+_MS = "https://modelscope.cn/models/lulutiyazejin/debate-engine-components/resolve/master"
 
 # 注册表：url 列表按序尝试（主源→镜像）；sha256 为空则只校验体积>0
 _REGISTRY: dict[str, dict] = {
@@ -50,20 +51,20 @@ _REGISTRY: dict[str, dict] = {
     "ocr": {
         "label": "OCR 识别包（RapidOCR）", "kind": "python", "size_hint": "~60MB",
         "desc": "扫描版 PDF / 图片文字识别，装完导入自动启用",
-        "urls": [f"{_GH}/ocr-win64.zip", f"{_MS}=ocr-win64.zip"],
+        "urls": [f"{_MS}/ocr-win64.zip", f"{_GH}/ocr-win64.zip"],
         "target": lambda: config.EXTRAS_PATH / "ocr",
         "pip_dev": ["rapidocr-onnxruntime", "pypdfium2"],
     },
     "docling": {
         "label": "文档解析增强（Docling）", "kind": "python", "size_hint": "~500MB",
         "desc": "结构感知 PDF/DOCX 解析（表格/标题层级），未装时降级纯文本",
-        "urls": [f"{_GH}/docling-win64.zip", f"{_MS}=docling-win64.zip"],
+        "urls": [f"{_MS}/docling-win64.zip", f"{_GH}/docling-win64.zip"],
         "target": lambda: config.EXTRAS_PATH / "docling",
         "pip_dev": ["docling>=2.0"],
     },
     "mineru": {
-        "label": "MinerU（外部解析引擎）", "kind": "external", "size_hint": "外装",
-        "desc": "重型版面分析引擎，请按官网安装后重启软件自动检测",
+        "label": "MinerU（外部解析引擎）", "kind": "external", "size_hint": "~3GB",
+        "desc": "重型版面分析引擎；支持一键安装（自动检测 GPU 装 CUDA 版，需本机有 Python），也可按官网手动安装后重启自动检测",
         "homepage": "https://github.com/opendatalab/MinerU",
         "probe_module": "magic_pdf",
     },
@@ -297,10 +298,118 @@ def install_component(name: str):
     if not spec:
         raise HTTPException(404, f"未知组件 {name}")
     if spec["kind"] == "external":
+        # 0.1.6 补丁项 7：MinerU 支持一键装（pip 进组件目录），其他外部引擎仍拒
+        if name == "mineru":
+            return StreamingResponse(_install_mineru_stream(),
+                                     media_type="application/x-ndjson")
         raise HTTPException(422, "外部引擎请按官网安装，本软件只做检测")
     stream = (_download_files_stream(name, spec) if spec.get("files")
               else _download_stream(name, spec))
     return StreamingResponse(stream, media_type="application/x-ndjson")
+
+
+def _find_system_python() -> str | None:
+    """0.1.6 补丁项 7：找系统 Python（frozen 引擎没 pip，需外借）。
+    优先 PATH 里的 python，其次 py launcher，再探默认安装目录。"""
+    import shutil as _sh
+    for cmd in ("python", "python3"):
+        p = _sh.which(cmd)
+        if p and "WindowsApps" not in p:   # 商店占位程序不算
+            return p
+    if _sh.which("py"):
+        return "py"
+    base = Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Python"
+    if base.exists():
+        for d in sorted(base.iterdir(), reverse=True):
+            exe = d / "python.exe"
+            if exe.exists():
+                return str(exe)
+    return None
+
+
+def _has_nvidia_gpu() -> bool:
+    """nvidia-smi 能跑通即认为有 N 卡（cu121 轮子可用）。"""
+    import shutil as _sh
+    import subprocess as _sp
+    if not _sh.which("nvidia-smi"):
+        return False
+    try:
+        flags = getattr(_sp, "CREATE_NO_WINDOW", 0)
+        r = _sp.run(["nvidia-smi", "-L"], capture_output=True, timeout=10,
+                    creationflags=flags)
+        return r.returncode == 0 and b"GPU" in r.stdout
+    except Exception:
+        return False
+
+
+def _install_mineru_stream():
+    """0.1.6 补丁项 7：MinerU 一键装——系统 Python 跑
+    `pip install --target 组件目录`，锁 cp312/win_amd64 轮子（与冻结引擎同 ABI）；
+    有 N 卡加 cu121 索引装 GPU torch（download.pytorch.org 已入直连白名单）；
+    模型权重不在本流范围（首次解析时按 MinerU 官方机制下载）。
+    断流（取消）时 kill 子进程，已装部分保留可重试。"""
+    import subprocess
+
+    def _emit(obj: dict) -> str:
+        return json.dumps(obj, ensure_ascii=False) + "\n"
+
+    py = _find_system_python()
+    if not py:
+        yield _emit({"done": True, "ok": False,
+                     "detail": "未找到系统 Python（MinerU 安装需要）。"
+                               "请先到 python.org 安装 Python 3.10+ 后重试，"
+                               "或按官网说明手动安装"})
+        return
+    target = config.EXTRAS_PATH / "mineru"
+    target.mkdir(parents=True, exist_ok=True)
+    gpu = _has_nvidia_gpu()
+    yield _emit({"status": f"检测到{'N 卡，装 GPU 版（cu121）' if gpu else '无 N 卡，装 CPU 版'}，"
+                           f"体积较大请耐心等候…", "percent": 1})
+    cmd = [py]
+    if py == "py":
+        cmd.append("-3")
+    cmd += ["-m", "pip", "install", "--target", str(target),
+            "--only-binary=:all:", "--platform", "win_amd64",
+            "--implementation", "cp", "--python-version", "312",
+            "--upgrade", "--no-warn-script-location", "--progress-bar", "off",
+            "magic-pdf[full]"]
+    if gpu:
+        cmd += ["--extra-index-url", "https://download.pytorch.org/whl/cu121"]
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, text=True,
+                            encoding="utf-8", errors="replace",
+                            creationflags=flags)
+    try:
+        assert proc.stdout is not None
+        n = 0
+        for line in proc.stdout:
+            line = line.strip()
+            if not line:
+                continue
+            n += 1
+            # pip 无总进度；用行数滑升到 95% 给视觉反馈
+            yield _emit({"status": line[:120],
+                         "percent": min(95, 5 + n * 2)})
+        code = proc.wait()
+        if code != 0:
+            yield _emit({"done": True, "ok": False,
+                         "detail": f"pip 退出码 {code}；已装部分保留，可重试。"
+                                   f"若反复失败请按官网说明手动安装"})
+            return
+        _post_install("mineru")
+        try:
+            __import__("magic_pdf")
+            ok_probe = True
+        except ImportError:
+            ok_probe = False
+        yield _emit({"done": True, "ok": True,
+                     "detail": ("MinerU 引擎包已安装" +
+                                ("并热生效" if ok_probe else "，重启软件后生效") +
+                                "；首次解析时模型按官方机制自动下载")})
+    finally:
+        if proc.poll() is None:   # 取消/断流：杀掉 pip 子进程
+            proc.kill()
 
 
 @router.post("/{name}/disable")

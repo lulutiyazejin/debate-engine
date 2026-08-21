@@ -10,6 +10,12 @@ interface CompRow {
   name: string; label: string; kind: string; size_hint: string;
   desc: string; state: "missing" | "installed" | "disabled"; homepage: string;
 }
+// 补丁项 7：MinerU 额外状态
+interface MineruInstallInfo {
+  installing?: boolean;
+  pct?: number;
+  msg?: string;
+}
 interface CompList {
   components: CompRow[];
   embedder: { impl: string; model: string; is_fallback: boolean };
@@ -20,9 +26,11 @@ const STATE_LABEL = { missing: "未安装", installed: "已安装", disabled: "�
 
 export default function ComponentsSection({ notify }: { notify: (msg: string) => void }) {
   const [data, setData] = useState<CompList | null>(null);
-  const [busy, setBusy] = useState("");        // 正在下载/重嵌入的组件名
+  const [busy, setBusy] = useState("");        // 正在下载/重嵌/安装的组件名
   const [pct, setPct] = useState(0);
   const [msg, setMsg] = useState("");
+  // 补丁项 7：MinerU 安装进度独立态
+  const [mineruInfo, setMineruInfo] = useState<MineruInstallInfo | null>(null);
   // 项 10：暂停态（保留进度，「继续」重发请求由 .part+Range 接着传）
   const [paused, setPaused] = useState<{ key: string; path: string; pct: number } | null>(null);
   const ctlRef = useRef<AbortController | null>(null);
@@ -34,18 +42,29 @@ export default function ComponentsSection({ notify }: { notify: (msg: string) =>
   useEffect(refresh, [refresh]);
 
   const runStream = async (key: string, path: string, label?: string) => {
-    // 0.1.6 热修：点击即反馈（toast+进度条双通道），杜绝「点了没反应」
-    notify(`开始下载 ${label || key}（断点续传，可暂停/取消）`);
-    setPaused(null); setBusy(key); setPct(0); setMsg("连接中…");
+    // 补丁项 7：MinerU 一键装也走同样流式协议（NDJSON）
+    if (label === "MinerU 一键安装") {
+      notify(`开始从系统 Python 下载安装 ${key}（约 3~5GB，不走代理；有 N 卡自动装 GPU 版）`);
+    } else {
+      notify(`开始下载 ${label || key}（断点续传，可暂停/取消）`);
+    }
+    setPaused(null); setBusy(key); setPct(0); setMsg("连接中...");
     const ctl = new AbortController();
     ctlRef.current = ctl; abortKind.current = "";
     let last = 0;
     try {
       await ndjsonPost(path, {}, (evt) => {
         if (evt.done) notify(evt.detail || (evt.ok ? "完成" : "失败"));
+        // 补丁项 7：MinerU 安装也更新 mineruInfo 供卡片显示
         else {
-          if (typeof evt.percent === "number") { setPct(evt.percent); last = evt.percent; }
-          if (evt.status) setMsg(evt.status);
+          if (typeof evt.percent === "number") {
+            setPct(evt.percent); last = evt.percent;
+            if (key === "mineru") setMineruInfo((prev) => ({ ...prev!, pct: evt.percent }));
+          }
+          if (evt.status) {
+            setMsg(evt.status);
+            if (key === "mineru") setMineruInfo((prev) => ({ ...prev!, msg: evt.status }));
+          }
           else if (typeof evt.speed_bps === "number") setMsg(fmtSpeed(evt.speed_bps));
         }
       }, ctl.signal);
@@ -55,7 +74,21 @@ export default function ComponentsSection({ notify }: { notify: (msg: string) =>
         // cancel：回「下载并启用」，.part 保留下次续传
       } else notify(`失败: ${e}`);
     }
-    finally { ctlRef.current = null; setBusy(""); refresh(); }
+    finally { 
+      if (key !== "mineru") {
+        ctlRef.current = null; 
+        setBusy(""); 
+        refresh(); 
+      } else {
+        // MinerU 装完自刷新探测
+        setTimeout(() => { 
+          ctlRef.current = null; 
+          setBusy(""); 
+          refresh(); 
+          setMineruInfo(null); 
+        }, 500);
+      }
+    }
   };
 
   const interrupt = (kind: "pause" | "cancel") => {
@@ -115,6 +148,29 @@ export default function ComponentsSection({ notify }: { notify: (msg: string) =>
                 <button className="danger-btn" disabled={!!busy}
                         onClick={() => setPaused(null)}>取消</button>
               </>
+            ) : c.kind === "external" && c.name === "mineru" ? (
+              // 补丁项 7：MinerU 优先一键装（有系统 Python 前提下）
+              busy === c.name ? (
+                <span className="pull-progress" title={msg}>
+                  <i style={{ width: `${pct}%` }} />
+                  <em>{pct}% {msg}</em>
+                </span>
+              ) : mineruInfo ? (
+                <span className="pull-progress" title={mineruInfo.msg}>
+                  <i style={{ width: `${mineruInfo.pct!}%` }} />
+                  <em>安装中 · {mineruInfo.pct}%
+                    {!(async () => {
+                      // 安装中不刷新页面，保持进度
+                    })()}
+                  </em>
+                </span>
+              ) : c.state === "missing" ? (
+                <button className="primary" disabled={!!busy}
+                        onClick={() => runStream(c.name,
+                          `/api/components/${c.name}/install`, "MinerU 一键安装")}>一键安装</button>
+              ) : (
+                <a className="link" href={c.homepage} target="_blank" rel="noreferrer">官网安装说明 ↗</a>
+              )
             ) : c.kind === "external" ? (
               <a className="link" href={c.homepage} target="_blank" rel="noreferrer">
                 官网安装说明 ↗</a>

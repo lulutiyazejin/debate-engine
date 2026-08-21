@@ -11,6 +11,8 @@ export interface Candidate {
   name: string; label: string; vram_gb: number; window: number;
   speed: string; quality: string; zh: string; good_at: string;
   min_runtime: string; compat_ok: boolean; recommended: boolean;
+  installed?: boolean;   // 补丁项 1：后端统一计算（含 ms_name 匹配）
+  ms_name?: string;      // 补丁项 1：魔搭 GGUF 仓（有则优先用它 pull，37MB/s 直连）
 }
 export interface OllamaStatus {
   running: boolean; hint?: string; installed_models: string[];
@@ -63,15 +65,19 @@ export default function LocalModelSection({ notify, onChanged, tick }: Props) {
   }, []);
   useEffect(() => refreshAll(0), [refreshAll, tick]);
 
-  // 一键 pull（NDJSON 进度流）
-  const pullModel = async (name: string) => {
+  // 一键 pull（NDJSON 进度流）。补丁项 1：name=实际拉取名（可能是 modelscope.cn/...），
+  // displayKey=卡片键（进度条定位用）；魔搭源直连 37MB/s 不走代理
+  const pullModel = async (name: string, displayKey?: string) => {
     // 0.1.6 补：Ollama 未运行时按钮不再装死——点击给明确指引
     if (!ollama?.running) {
       notify("Ollama 未运行：先点上方的「一键安装」或「一键启动」，详情见状态行小字");
       return;
     }
-    setPulling(name); setPullPct(0); setPullMsg("连接中…");
-    notify(`开始从 Ollama 官方源拉取 ${name}（下载通道见「运行状态」行）`);
+    const key = displayKey || name;
+    setPulling(key); setPullPct(0); setPullMsg("连接中…");
+    notify(name.startsWith("modelscope.cn/")
+      ? `开始从魔搭国内源拉取 ${key}（直连高速，不走代理）`
+      : `开始从 Ollama 官方源拉取 ${key}（下载通道见「运行状态」行）`);
     try {
       const r = await fetch(`${engineBase()}/api/config/ollama/pull`, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -92,7 +98,7 @@ export default function LocalModelSection({ notify, onChanged, tick }: Props) {
           if (!line) continue;
           const evt = JSON.parse(line);
           if (evt.done) {
-            notify(evt.ok ? `${name} 已下载并设为本地默认模型（热生效）`
+            notify(evt.ok ? `${key} 已下载并设为本地默认模型（热生效）`
                           : `下载失败：${evt.detail}（可到「网络与代理」改代理后重试）`);
           } else {
             if (typeof evt.percent === "number") setPullPct(evt.percent);
@@ -190,6 +196,9 @@ export default function LocalModelSection({ notify, onChanged, tick }: Props) {
   const installed = (name: string) =>
     !!ollama?.installed_models.some((m) => m.split(":")[0] === name.split(":")[0]);
 
+  // 补丁项 1：精选卡优先用魔搭源（ms_name），自由输入仍原样传
+  const pullName = (c: Candidate) => c.ms_name || c.name;
+
   return (
     <>
       <h3>本地模型（Ollama）</h3>
@@ -201,7 +210,11 @@ export default function LocalModelSection({ notify, onChanged, tick }: Props) {
               ? <>检测到 {hw.gpu_name} · {hw.vram_gb}GB / 内存 {hw.ram_gb}GB
                   {hw.recommend && <> → 推荐 <code>{hw.recommend}</code>
                     <button className="link" disabled={!!pulling}
-                            onClick={() => pullModel(hw.recommend!)}>一键下载</button></>}
+                            onClick={() => {
+                              // 补丁项 1：推荐一键下也优先魔搭源
+                              const c = ollama?.candidates.find((x) => x.name === hw.recommend);
+                              pullModel(c?.ms_name || hw.recommend!, hw.recommend!);
+                            }}>一键下载</button></>}
                 </>
               : <span className="muted small">{hw.note}</span>}
             <button className="link" onClick={() => refreshAll(1)}>重新探测</button>
@@ -262,9 +275,9 @@ export default function LocalModelSection({ notify, onChanged, tick }: Props) {
                 </span>
               ) : (
                 <button disabled={!!pulling}
-                        onClick={() => (c.compat_ok ? pullModel(c.name)
+                        onClick={() => (c.compat_ok ? pullModel(pullName(c), c.name)
                           : notify(`该模型需 Ollama ≥ ${c.min_runtime}，先升级 Ollama 再下载`))}>
-                  {installed(c.name) ? "重新下载" : "下载并启用"}</button>
+                  {(c.installed ?? installed(c.name)) ? "重新下载" : "下载并启用"}</button>
               )}
             </div>
             <div className="model-meta muted small">

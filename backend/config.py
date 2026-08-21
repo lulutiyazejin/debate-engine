@@ -247,6 +247,9 @@ def effective_provider_models() -> dict[str, str]:
 # ---------- 代理三态（0.1.3 B6：不开/系统/自定义，本地地址永远直连） ----------
 _LOCAL_HOSTS = ("127.0.0.1", "localhost", "0.0.0.0")
 
+# 0.1.6 补丁项 2/7：域名直连白名单（不挂代理）
+DIRECT_HOSTS = {"modelscope.cn", "download.pytorch.org"}
+
 
 def proxy_config() -> dict:
     """settings.json 的 proxy 键：{"mode": "off|system|custom", "url": "..."}。"""
@@ -289,13 +292,18 @@ def system_proxy_url() -> str | None:
 def httpx_proxy_for(url: str) -> str | None:
     """按代理三态给 httpx 的 proxy 参数；127.0.0.1/localhost 一律 bypass
     （否则代理会切断本地 ollama）。system 模式解析注册表真实地址
-    （0.1.6 项 1：不再依赖环境变量，安装版干净环境也能走代理）。"""
+    （0.1.6 项 1：不再依赖环境变量，安装版干净环境也能走代理）。
+    0.1.6 补丁项 2：DIRECT_HOSTS 白名单（魔搭/pytorch 国内直连快过代理）。"""
     try:
         host = url.split("://", 1)[-1].split("/", 1)[0].split(":")[0]
     except Exception:
         host = ""
     if host in _LOCAL_HOSTS:
         return None
+    # 补丁项 2：白名单域名（含子域名）直连
+    for direct in DIRECT_HOSTS:
+        if host == direct or host.endswith("." + direct):
+            return None
     cfg = proxy_config()
     if cfg["mode"] == "custom" and cfg["url"]:
         return cfg["url"]

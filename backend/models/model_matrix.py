@@ -20,37 +20,44 @@ MATRIX: list[dict] = [
      "vram_gb": 21.0, "window": 65536, "auto_ctx": 32768,
      "speed": "3B 档", "quality": "32B 档", "prompt_tier": "large",
      "min_runtime": "0.12.0", "kv_mb_per_token": 0.02, "sec_per_8k": 10,
-     "zh": "中文极佳", "good_at": "长文总结 / 复杂论证 / 全能"},
+     "zh": "中文极佳", "good_at": "长文总结 / 复杂论证 / 全能",
+     # 0.1.6 补丁项 1：魔搭 GGUF 仓（ollama pull modelscope.cn/...自动配模板）
+     "ms_name": "modelscope.cn/unsloth/Qwen3.5-35B-A3B-GGUF"},
     {"name": "qwen2.5:14b",
      "label": "Qwen2.5 14B（余量备选）",
      "vram_gb": 10.0, "window": 32768, "auto_ctx": 32768,
      "speed": "14B 档", "quality": "14B 档", "prompt_tier": "large",
      "min_runtime": "0.1.0", "kv_mb_per_token": 0.19, "sec_per_8k": 25,
-     "zh": "中文很好", "good_at": "摘要 / 反驳生成"},
+     "zh": "中文很好", "good_at": "摘要 / 反驳生成",
+     "ms_name": "modelscope.cn/Qwen/Qwen2.5-14B-Instruct-GGUF"},
     {"name": "qwen2.5:7b",
      "label": "Qwen2.5 7B（通用）",
      "vram_gb": 6.0, "window": 32768, "auto_ctx": 16384,
      "speed": "7B 档", "quality": "7B 档", "prompt_tier": "small",
      "min_runtime": "0.1.0", "kv_mb_per_token": 0.055, "sec_per_8k": 14,
-     "zh": "中文良好", "good_at": "分类 / 短生成"},
+     "zh": "中文良好", "good_at": "分类 / 短生成",
+     "ms_name": "modelscope.cn/Qwen/Qwen2.5-7B-Instruct-GGUF"},
     {"name": "qwen2.5:3b",
      "label": "Qwen2.5 3B（轻量）",
      "vram_gb": 3.0, "window": 32768, "auto_ctx": 8192,
      "speed": "3B 档", "quality": "3B 档", "prompt_tier": "small",
      "min_runtime": "0.1.0", "kv_mb_per_token": 0.03, "sec_per_8k": 8,
-     "zh": "中文可用", "good_at": "轻量分类 / 低配机"},
+     "zh": "中文可用", "good_at": "轻量分类 / 低配机",
+     "ms_name": "modelscope.cn/Qwen/Qwen2.5-3B-Instruct-GGUF"},
     {"name": "deepseek-r1:7b",
      "label": "DeepSeek-R1 7B（推理强）",
      "vram_gb": 6.0, "window": 65536, "auto_ctx": 16384,
      "speed": "7B 档", "quality": "7B 档", "prompt_tier": "small",
      "min_runtime": "0.5.0", "kv_mb_per_token": 0.055, "sec_per_8k": 20,
-     "zh": "中文良好", "good_at": "逻辑推理 / 论证解析"},
+     "zh": "中文良好", "good_at": "逻辑推理 / 论证解析",
+     "ms_name": "modelscope.cn/unsloth/DeepSeek-R1-Distill-Qwen-7B-GGUF"},
     {"name": "deepseek-r1:14b",
      "label": "DeepSeek-R1 14B（推理强·中体量）",
      "vram_gb": 10.0, "window": 65536, "auto_ctx": 32768,
      "speed": "14B 档", "quality": "14B 档", "prompt_tier": "large",
      "min_runtime": "0.5.0", "kv_mb_per_token": 0.19, "sec_per_8k": 35,
-     "zh": "中文很好", "good_at": "深度推理 / 谬误检测"},
+     "zh": "中文很好", "good_at": "深度推理 / 谬误检测",
+     "ms_name": "modelscope.cn/unsloth/DeepSeek-R1-Distill-Qwen-14B-GGUF"},
 ]
 
 CTX_GEARS = [4096, 8192, 16384, 32768, 65536]
@@ -61,13 +68,20 @@ _OVERHEAD_GB = 2.0           # 运行时开销固定项
 
 
 def find(model: str) -> dict | None:
-    """精确匹配优先；无 tag 时按主名匹配首行。"""
+    """精确匹配优先；无 tag 时按主名匹配首行。
+    补丁项 1：兼容 ms_name（大小写不敏感），自由输入 modelscope.cn/xxx/yyy 也能找到。"""
     for m in MATRIX:
         if m["name"] == model:
             return m
     base = model.split(":")[0]
     for m in MATRIX:
         if m["name"].split(":")[0] == base:
+            return m
+    # 补丁项 1：ms_name 兼容
+    model_lower = model.lower()
+    for m in MATRIX:
+        ms = m.get("ms_name", "") or ""
+        if ms.lower() == model_lower or ms.split("/")[-1].lower() == model_lower:
             return m
     return None
 

@@ -319,7 +319,8 @@ def patch_web_enrich(req: WebEnrichPatch):
 def ollama_status():
     """探测 Ollama：运行状态 / 已装模型 / 矩阵候选卡（G2）/ 下载通道（F3b）/
     运行时版本比对（不兼容标升级）/ 硬件推荐徽标（H2）。
-    0.1.6 hotfix：+has_binary（本机是否有二进制，区分未安装 vs 已安装未启动）。"""
+    0.1.6 hotfix：+has_binary（本机是否有二进制，区分未安装 vs 已安装未启动）。
+    0.1.6 补丁项 1：cands 每项 +installed 布尔（后端统一计算，不再前端拼名）。"""
     from ingestion import ollama_adapter as oa
     from models import model_matrix as mm
     running = oa.is_installed()
@@ -329,9 +330,16 @@ def ollama_status():
     version = oa.runtime_version() if running else None
     hw = config.load_settings().get("hw_profile") or {}
     rec = hw.get("recommend") or ""
+    # 补丁项 1：已装模型 base 列表（大小写不敏感）
+    installed_base = [m.split(":")[0].lower() for m in models]
     cands = []
     for m in oa.candidates():
         compat = mm.runtime_ok(m["name"], version)
+        # 补丁项 1：检查 name 或 ms_name 是否在已装列表中
+        name_base = m["name"].split(":")[0].lower()
+        ms_name = m.get("ms_name", "") or ""
+        ms_base = ms_name.split("/")[-1].split(":")[0].lower() if ms_name else ""
+        installed = name_base in installed_base or ms_base in installed_base
         cands.append({
             "name": m["name"], "label": m["label"],
             "vram_gb": m["vram_gb"], "window": m["window"],
@@ -339,7 +347,9 @@ def ollama_status():
             "zh": m["zh"], "good_at": m["good_at"],
             "min_runtime": m["min_runtime"],
             "compat_ok": compat,
-            "recommended": m["name"] == rec})
+            "recommended": m["name"] == rec,
+            "installed": installed,
+            "ms_name": m.get("ms_name", "")}))
     return {"running": running, "hint": hint,
             "installed_models": models or [],
             "active_model": active,
