@@ -1,0 +1,89 @@
+# 0.1.6 热修：服务端搬运——GitHub runner 直接从官方源下载并上传 Release 资产，
+# 全程不经用户本机（本机上行网络会掐大文件 POST）。
+# 触发：Actions 页手动 Run workflow，可选 job=all|components|bge-m3。
+name: mirror-assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      job:
+        description: "all | components | bge-m3"
+        required: false
+        default: "all"
+
+permissions:
+  contents: write
+
+jobs:
+  components:
+    if: inputs.job == 'all' || inputs.job == 'components'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: pip download ocr (win64 wheels)
+        run: |
+          mkdir -p out/ocr
+          pip download --dest out/ocr --only-binary=:all: \
+            --platform win_amd64 --python-version 312 \
+            rapidocr-onnxruntime pypdfium2
+
+      - name: pip download docling (cpu torch 控体积)
+        run: |
+          mkdir -p out/docling
+          pip download --dest out/docling --only-binary=:all: \
+            --platform win_amd64 --python-version 312 \
+            --index-url https://download.pytorch.org/whl/cpu \
+            --extra-index-url https://pypi.org/simple \
+            docling
+
+      - name: zip (site-packages 根布局)
+        run: |
+          (cd out/ocr && zip -qr ../../ocr-win64.zip .)
+          (cd out/docling && zip -qr ../../docling-win64.zip .)
+          ls -la ocr-win64.zip docling-win64.zip
+
+      - name: upload to components-v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view components-v1 || \
+            gh release create components-v1 --title "组件资产 components-v1" \
+              --notes "runner 服务端搬运：ocr/docling win64 wheels 包，解压布局=site-packages 根"
+          gh release upload components-v1 ocr-win64.zip docling-win64.zip --clobber
+
+  bge-m3:
+    if: inputs.job == 'all' || inputs.job == 'bge-m3'
+    runs-on: ubuntu-latest
+    steps:
+      - name: download from HuggingFace official
+        run: |
+          BASE=https://huggingface.co/BAAI/bge-m3/resolve/main
+          for f in config.json config_sentence_transformers.json modules.json \
+                   sentence_bert_config.json special_tokens_map.json \
+                   tokenizer_config.json sentencepiece.bpe.model tokenizer.json; do
+            curl -fL "$BASE/$f" -o "$f"
+          done
+          mkdir -p 1_Pooling
+          curl -fL "$BASE/1_Pooling/config.json" -o 1_Pooling/config.json
+          curl -fL "$BASE/pytorch_model.bin" -o pytorch_model.bin
+          ls -la
+
+      - name: split 2.27GB weight (GitHub 单资产 ≤2GiB)
+        run: split -b 1900M pytorch_model.bin pytorch_model.bin.part_
+
+      - name: upload to bge-m3-v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view bge-m3-v1 || \
+            gh release create bge-m3-v1 --title "BGE-M3 镜像 bge-m3-v1" \
+              --notes "runner 从 HF 官方服务端搬运；pytorch_model.bin 分片 part_*，按序拼接还原"
+          gh release upload bge-m3-v1 \
+            config.json config_sentence_transformers.json modules.json \
+            sentence_bert_config.json special_tokens_map.json tokenizer_config.json \
+            sentencepiece.bpe.model tokenizer.json \
+            "1_Pooling/config.json#pooling_config.json" \
+            pytorch_model.bin.part_* --clobber

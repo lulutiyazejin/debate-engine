@@ -33,7 +33,9 @@ export default function ComponentsSection({ notify }: { notify: (msg: string) =>
   }, []);
   useEffect(refresh, [refresh]);
 
-  const runStream = async (key: string, path: string) => {
+  const runStream = async (key: string, path: string, label?: string) => {
+    // 0.1.6 热修：点击即反馈（toast+进度条双通道），杜绝「点了没反应」
+    notify(`开始下载 ${label || key}（断点续传，可暂停/取消）`);
     setPaused(null); setBusy(key); setPct(0); setMsg("连接中…");
     const ctl = new AbortController();
     ctlRef.current = ctl; abortKind.current = "";
@@ -119,7 +121,7 @@ export default function ComponentsSection({ notify }: { notify: (msg: string) =>
             ) : (
               <>
                 <button disabled={!!busy}
-                        onClick={() => runStream(c.name, `/api/components/${c.name}/install`)}>
+                        onClick={() => runStream(c.name, `/api/components/${c.name}/install`, c.label)}>
                   {c.state === "missing" ? "下载并启用" : "重新下载"}</button>
                 {c.state !== "missing" && (
                   <>
@@ -139,7 +141,7 @@ export default function ComponentsSection({ notify }: { notify: (msg: string) =>
                 </span>
               ) : (
                 <button className="primary" disabled={!!busy}
-                        onClick={() => runStream("reembed", "/api/components/reembed")}>
+                        onClick={() => runStream("reembed", "/api/components/reembed", "全库重嵌入")}>
                   全库重嵌入（待升级 {data?.reembed_pending} 块）</button>
               )
             )}

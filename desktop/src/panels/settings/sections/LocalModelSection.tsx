@@ -70,6 +70,7 @@ export default function LocalModelSection({ notify, onChanged, tick }: Props) {
       return;
     }
     setPulling(name); setPullPct(0); setPullMsg("连接中…");
+    notify(`开始从 Ollama 官方源拉取 ${name}（下载通道见「运行状态」行）`);
     try {
       const r = await fetch(`${engineBase()}/api/config/ollama/pull`, {
         method: "POST", headers: { "Content-Type": "application/json" },

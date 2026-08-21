@@ -199,9 +199,8 @@
 - components-v1 资产（ocr/docling zip）：本地构建 ocr-win64.zip 107MB；上传连续 5 次失败（代理断大文件 POST，curl 56 schannel close_notify；直连则吊销检查不过）→ 按用户红线终止，留待手动上传；release 页 starter 残包已随失败轮次清理。
 - 编译：pytest 77 passed；tsc 0 错误。
 
-### ���� �� Ollama ����ʱһ��װ���ٷ�����������̬��
-- ���򣺾�ѡģ�͡����ز����á����� Ollama ����ʱ������δװʱ��ťװ����0.1.6 hotfix �Ѹ�ָ�������������û��ֶ�ȥ����װ��
-- ��񣺺�� +POST /api/config/ollama/install-runtime��NDJSON ������httpx.stream �� https://ollama.com/download/OllamaSetup.exe��������̬ httpx_proxy_for����.part ������Inno ��Ĭ /VERYSILENT �����Ա���ش���ollama_exe_path() ̽ PATH+LOCALAPPDATA\Programs\Ollama����װ����дע��� PATH ��ǰ���̲��ɼ�����status +has_binary��
-- ǰ�ˣ�LocalModelSection ����״̬�У�δװʱ�ԡ�һ����װ���ٷ�������������primary ť+��������װ���Զ� serve()��
-- ʵ�⣺system ��������ʽ�����¼�������0��7.8%�����ٷ�Դ�������ɴ
-- ���룺tsc 0 ����pytest ȫ�̣���װ Z: ��֤ health 0.1.6��
+### 热修 · Ollama 运行时一键装 + 下载反馈 + 服务端搬运（完成）
+- 运行时一键装：后端 +POST /api/config/ollama/install-runtime（NDJSON 流）：httpx.stream 拉 ollama.com/download/OllamaSetup.exe（代理三态），.part 续传，Inno /VERYSILENT 静默免管理员；ollama_exe_path() 探 PATH+LOCALAPPDATA\Programs\Ollama；status +has_binary；前端未装时显「一键安装（官方包·代理）」primary 钮+进度，装完自动 serve()。实测 system 代理下进度事件正常。
+- 下载反馈：pullModel/runStream 点击即 toast（开始拉取/开始下载），未运行/未装时给指引 toast，杜绝「点了没反应」。
+- 服务端搬运：+.github/workflows/mirror-assets.yml（workflow_dispatch）：runner 从 PyPI 官方 pip download 打 ocr/docling zip 传 components-v1（docling 用 cpu torch 索引控体积）；bge-m3 从 HF 官方拉 10 件，pytorch_model.bin 2.27GB 超单资产 2GiB → split 1900M 分片传 bge-m3-v1。全程不经本机。
+- 编译：tsc 0 错误；pytest 77 passed；重装 Z: 验证。
