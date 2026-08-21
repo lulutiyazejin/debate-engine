@@ -346,6 +346,8 @@ def ollama_status():
             "version": version,
             "channel": oa.download_channel(),
             "has_binary": oa.has_ollama_binary(),
+            # 0.1.6 hotfix5：运行时安装是后台线程，刷新页面后靠它恢复进度显示
+            "installing": oa.install_runtime_status()["installing"],
             "candidates": cands}
 
 

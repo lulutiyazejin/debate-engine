@@ -17,6 +17,7 @@ export interface OllamaStatus {
   active_model?: string; version?: string | null;
   channel?: { mode: string; detail: string };
   has_binary?: boolean;
+  installing?: boolean;   // hotfix5：后台安装线程存活标记（刷新后恢复进度用）
   candidates: Candidate[];
 }
 interface Hardware {
@@ -117,6 +118,7 @@ export default function LocalModelSection({ notify, onChanged, tick }: Props) {
   // 0.1.6 hotfix：runtime 一键装，装完自动拉起
   const installRuntime = async () => {
     setInstalling("downloading"); setInstPct(0); setInstMsg("连接中…");
+    notify("安装任务已连接：官方包后台下载，关闭页面不中断，可随时回来续看进度");
     try {
       await ndjsonPost("/api/config/ollama/install-runtime", {}, (evt) => {
         if (evt.done) {
@@ -131,6 +133,13 @@ export default function LocalModelSection({ notify, onChanged, tick }: Props) {
     } catch (e) { notify(`安装失败：${e}`); }
     finally { setInstalling(""); refreshAll(0); onChanged(); }
   };
+
+  // 0.1.6 hotfix5：后端安装线程独立于页面存活——刷新/重开后若仍在装且尚无
+  // 二进制，自动重连接看进度（重复调用=接入，不会开第二个任务）
+  useEffect(() => {
+    if (ollama?.installing && !ollama.has_binary && installing === "") installRuntime();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ollama?.installing]);
 
   // F2：档位写入（热生效）
   const patchCtx = async (mode: "auto" | "manual", value?: number) => {

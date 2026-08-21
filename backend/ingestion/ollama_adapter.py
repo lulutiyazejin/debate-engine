@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -159,22 +160,25 @@ OLLAMA_SETUP_URLS = [
     "https://ollama.com/download/OllamaSetup.exe",
 ]
 
-_RUNTIME_DL_BUSY = False   # 单飞锁：并发点击不双写 .part（hotfix4 并发 bug）
+# 0.1.6 hotfix5：下载/安装挪进后台线程——生命周期不再绑 HTTP 连接（关界面/
+# 断流不中断任务），重复点击=重连看实时进度；单飞由线程存活判定天然保证。
+_RUNTIME_LOCK = threading.Lock()
+_RUNTIME_TASK: dict = {"seq": 0, "event": None, "running": False}
 
 
-def install_runtime_stream():
-    """0.1.6 hotfix2：Ollama 运行时一键装——多源轮换+断点续传：
-    掐线不从头来，.part 保留换源接着下；本地已有完整包则跳过下载；
-    Inno 静默安装（免管理员、隐藏窗）；装完由前端接一键启动。"""
-    global _RUNTIME_DL_BUSY
+def _runtime_emit(obj: dict) -> None:
+    """worker 线程写最新进度事件；seq 自增供流端去重转发。"""
+    _RUNTIME_TASK["event"] = obj
+    _RUNTIME_TASK["seq"] += 1
+
+
+def _install_runtime_worker() -> None:
+    """后台线程体：多源轮换+断点续传下载 → Inno 静默安装（免管理员、隐藏窗）。
+    重试按进展计：单次尝试新增≥1MB 即清零计数，仅连续 6 次零进展才判失败
+    （1.46GB 慢代理源掐线多次也能磨完，不再被固定 6 次冤杀）。"""
     import subprocess
     import tempfile
     import httpx
-    if _RUNTIME_DL_BUSY:
-        yield {"done": True, "ok": False,
-               "detail": "另一个安装任务正在进行，请稍候再试"}
-        return
-    _RUNTIME_DL_BUSY = True
     tmp = Path(tempfile.gettempdir()) / "OllamaSetup.exe"
     part = tmp.with_name(tmp.name + ".part")
     last_url = OLLAMA_SETUP_URLS[0]
@@ -182,13 +186,17 @@ def install_runtime_stream():
         if not (tmp.exists() and tmp.stat().st_size > 1 << 20):
             done = part.stat().st_size if part.exists() else 0
             if done:
-                yield {"status": f"断点续传（已存 {done // 1048576}MB）…",
-                       "percent": 0}
+                _runtime_emit({"status": f"断点续传（已存 {done // 1048576}MB）…",
+                               "percent": 0})
             total_known = 0
             finished = False
             last_err = ""
-            for attempt in range(6):   # 两源轮换×3 轮，全程续传
-                url = last_url = OLLAMA_SETUP_URLS[attempt % len(OLLAMA_SETUP_URLS)]
+            no_prog = 0   # 连续零进展次数；有进展即清零
+            idx = 0
+            while no_prog < 6:
+                url = last_url = OLLAMA_SETUP_URLS[idx % len(OLLAMA_SETUP_URLS)]
+                idx += 1
+                start = done
                 try:
                     headers = {"Range": f"bytes={done}-"} if done else {}
                     with httpx.stream("GET", url, headers=headers,
@@ -207,37 +215,72 @@ def install_runtime_stream():
                                 f.write(blk)
                                 done += len(blk)
                                 if total_known and done % (8 << 20) < (1 << 20):
-                                    yield {"percent": round(done * 100 / total_known, 1),
-                                           "status": f"{src}源 {done // 1048576}/"
-                                                     f"{total_known // 1048576}MB"}
+                                    _runtime_emit(
+                                        {"percent": round(done * 100 / total_known, 1),
+                                         "status": f"{src}源 {done // 1048576}/"
+                                                   f"{total_known // 1048576}MB"})
                     if not total_known or done >= total_known:
                         finished = True
                         break
                     last_err = f"{url} → 中途断线（已下 {done // 1048576}MB）"
                 except Exception as e:
                     last_err = f"{url} → {e}"
-                yield {"status": f"断线换源续传…（{attempt + 1}/6）"}
+                no_prog = 0 if done - start >= (1 << 20) else no_prog + 1
+                _runtime_emit({"status": f"断线换源续传…（零进展 {no_prog}/6）"})
             if not finished:
-                yield {"done": True, "ok": False,
-                       "detail": f"下载失败：{last_err}。已下部分保留，"
-                                 f"重试将从断点继续"}
+                _runtime_emit({"done": True, "ok": False,
+                               "detail": f"下载失败：{last_err}。已下部分保留，"
+                                         f"重试将从断点继续"})
                 return
             part.replace(tmp)
-        yield {"status": "静默安装中（无弹窗）…", "percent": 100}
+        _runtime_emit({"status": "静默安装中（无弹窗）…", "percent": 100})
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         p = subprocess.run([str(tmp), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"],
                            creationflags=flags, timeout=900,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if p.returncode != 0:
-            yield {"done": True, "ok": False,
-                   "detail": f"安装程序返回码 {p.returncode}"}
+            _runtime_emit({"done": True, "ok": False,
+                           "detail": f"安装程序返回码 {p.returncode}"})
             return
-        yield {"done": True, "ok": True,
-               "detail": "Ollama 运行时安装完成，正在自动拉起"}
+        _runtime_emit({"done": True, "ok": True,
+                       "detail": "Ollama 运行时安装完成，正在自动拉起"})
     except Exception as e:
-        yield {"done": True, "ok": False, "detail": f"{last_url} → {e}"}
+        _runtime_emit({"done": True, "ok": False, "detail": f"{last_url} → {e}"})
     finally:
-        _RUNTIME_DL_BUSY = False
+        _RUNTIME_TASK["running"] = False
+
+
+def install_runtime_status() -> dict:
+    """轮询接口用：是否有任务在跑 + 最新进度事件。"""
+    return {"installing": _RUNTIME_TASK["running"],
+            "progress": _RUNTIME_TASK["event"]}
+
+
+def install_runtime_stream():
+    """0.1.6 hotfix5：一键装入口——真正干活的是后台线程，本生成器只转发
+    进度；客户端断开不影响任务，再次调用=接入进行中任务续看进度。"""
+    import time
+    with _RUNTIME_LOCK:
+        if not _RUNTIME_TASK["running"]:
+            _RUNTIME_TASK["running"] = True
+            _runtime_emit({"status": "任务启动（后台下载，关闭页面不中断）…",
+                           "percent": 0})
+            threading.Thread(target=_install_runtime_worker,
+                             daemon=True).start()
+        else:
+            _runtime_emit({"status": "已有任务进行中，接入实时进度…"})
+    seen = 0
+    while True:
+        if _RUNTIME_TASK["seq"] != seen:
+            seen = _RUNTIME_TASK["seq"]
+            evt = _RUNTIME_TASK["event"]
+            if evt:
+                yield evt
+                if evt.get("done"):
+                    return
+        elif not _RUNTIME_TASK["running"]:
+            return   # 线程已收尾且事件转发完毕的兜底出口
+        time.sleep(0.5)
 
 
 def import_gguf(path: str, name: str) -> tuple[bool, str]:

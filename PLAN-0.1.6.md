@@ -208,3 +208,10 @@
 - 热修4·安装包多源续传：OLLAMA_SETUP_URLS=[GitHub latest/download（主，实测稳）, ollama.com（备）]；.part 断点续传跨源跨次生效（Range，206 判定，不支持则从头）；掐线换源×6 轮；本地完整包跳过下载；单飞锁防并发双写 .part（hotfix4b，实测探针并发暴露后修）；前端 guard toast 剪短。
 - 实测：续传事件「断点续传（已存 170MB）→GitHub源 184/1492MB」；干净全量后台跑至 288MB 稳步增长。
 - 编译：tsc 0 错误；pytest 77 passed；重装 Z: 验证。
+
+### 热修5 · 运行时下载脱钩 HTTP 连接（后台线程化）
+- 根因：下载写在 StreamingResponse 生成器里，客户端一断（关页/超时）生成器被杀→下载停（672MB 实证：单连接未掉，是监控 curl --max-time 到期杀客户端）。
+- ollama_adapter.py：下载/安装挪进 daemon 线程 _install_runtime_worker（_runtime_emit 写 seq+event 共享态）；install_runtime_stream 只转发进度，断开不影响任务，再调用=接入进行中任务；单飞改线程存活判定（_RUNTIME_LOCK）；重试改进展感知：单次新增≥1MB 清零计数，仅连续 6 次零进展才判败（固定 6 次会冤杀 1.46GB 慢源）；+install_runtime_status()。
+- settings.py：ollama_status +installing（刷新页面后恢复进度显示）。
+- LocalModelSection：OllamaStatus +installing；点击 toast「后台下载关页不中断」；useEffect 自动重连（installing 且无二进制且本地空闲才接，has_binary 拦住装完后误重装）。
+- 编译：SYNTAX OK；pytest 77 passed；tsc 0 错误。
