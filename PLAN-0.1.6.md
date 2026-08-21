@@ -215,3 +215,4 @@
 - settings.py：ollama_status +installing（刷新页面后恢复进度显示）。
 - LocalModelSection：OllamaStatus +installing；点击 toast「后台下载关页不中断」；useEffect 自动重连（installing 且无二进制且本地空闲才接，has_binary 拦住装完后误重装）。
 - 编译：SYNTAX OK；pytest 77 passed；tsc 0 错误。
+- 交付：重打包三件（tauri/PyInstaller/makensis 117.6MB）；Z: 静默重装 health 0.1.6；实测断点 720MB 起步续传、客户端 15s 被杀后台照跑（20s 再涨 11MB）、二次调用接入进行中任务；安装包上传 Release v0.1.6 资产 HTTP 201（browser_download_url 已可公开下载）；源码推送 c5a1e75。
