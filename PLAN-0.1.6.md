@@ -248,12 +248,13 @@
 - **联动**：MinerU 安装逻辑（补丁项 7）不动。
 
 ### 补丁实施结果（代码完成度）
-- **补丁批 1（后端安装链）**：✅ config.py DIRECT_HOSTS → patch 3a/3b (`_install_runtime_worker()`/.meta 校验/装失败删包) → 补丁项 2 (OLLAMA_SETUP_URLS 首源魔搭)
-- **补丁批 2（模型链）**：✅ model_matrix.py (+ms_name/find 兼容) → settings.py (ollama_status installed+ms_name) → ollama_adapter (serve_start NO_PROXY) → LocalModelSection.tsx (pullModel(ms_name)+H2 推荐行适配)
-- **补丁批 3（分发链）**：✅ components.py (_MS 地址修正+ urls 顺序交换) → mirror-assets.yml (+ollama-setup job + 魔搭上传步骤)
-- **补丁批 4（MinerU）**：✅ components.py (_install_mineru_stream 端点+ GPU 检测/cp312 轮子) → ComponentsSection.tsx(一键装按钮 +mineruInfo 态)
+- **补丁批 1**（后端安装链）：✅ config.py DIRECT_HOSTS → patch 3a/3b (`_install_runtime_worker()`/.meta 校验/装失败删包) → 补丁项 2 (OLLAMA_SETUP_URLS 首源魔搭)
+- **补丁批 2**（模型链）：✅ model_matrix.py (+ms_name/find 兼容) → settings.py (ollama_status installed+ms_name) → ollama_adapter (serve_start NO_PROXY) → LocalModelSection.tsx (pullModel(ms_name)+H2 推荐行适配)
+- **补丁批 3**（分发链）：✅ components.py (_MS 地址修正+ urls 顺序交换) → mirror-assets.yml (+ollama-setup job + 魔搭上传步骤)
+- **补丁批 4**（MinerU）：✅ components.py (_install_mineru_stream 端点+ GPU 检测/cp312 轮子) → ComponentsSection.tsx(一键装按钮 +mineruInfo 态)
+- **Bug 修复**：GPU 检测函数 `_has_nvidia_gpu()`移除 CREATE_NO_WINDOW 标志，实测从 False→True
 - **打包验证**：tsc 0 error; PyInstaller 完成；NSIS 安装包 112.1MB (Z: 静默装 OK, health 返回正常)
-- **自测备注**：因沙箱限制无法持续跑后端 API，前端功能依赖 Tauri 桌面端热重载验证；已确认关键逻辑代码完整实现，补丁批 4 MinerU 需本机环境有 Python 才能实际测试
+- **自测备注**：因沙箱限制无法持续跑后端 API，前端功能依赖 Tauri 桌面端热重载验证；已确认关键逻辑代码完整实现，补丁批 4 MinerU 需本机环境有 Python 才能实际测试（本地验证通过 pip 命令生成和 GPU 检测）
 
 ### 批次划分（风险升序，同文件聚一批）
 - 补丁批 1（后端安装链）：config.py DIRECT_HOSTS → 补丁项 3a/3b → 补丁项 2 首源（ollama_adapter.py 同文件聚改，从下往上）→ 3c 清残留 → 编译 + 红线 R5/R6 走查。
