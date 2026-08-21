@@ -159,14 +159,22 @@ OLLAMA_SETUP_URLS = [
     "https://ollama.com/download/OllamaSetup.exe",
 ]
 
+_RUNTIME_DL_BUSY = False   # 单飞锁：并发点击不双写 .part（hotfix4 并发 bug）
+
 
 def install_runtime_stream():
     """0.1.6 hotfix2：Ollama 运行时一键装——多源轮换+断点续传：
     掐线不从头来，.part 保留换源接着下；本地已有完整包则跳过下载；
     Inno 静默安装（免管理员、隐藏窗）；装完由前端接一键启动。"""
+    global _RUNTIME_DL_BUSY
     import subprocess
     import tempfile
     import httpx
+    if _RUNTIME_DL_BUSY:
+        yield {"done": True, "ok": False,
+               "detail": "另一个安装任务正在进行，请稍候再试"}
+        return
+    _RUNTIME_DL_BUSY = True
     tmp = Path(tempfile.gettempdir()) / "OllamaSetup.exe"
     part = tmp.with_name(tmp.name + ".part")
     last_url = OLLAMA_SETUP_URLS[0]
@@ -228,6 +236,8 @@ def install_runtime_stream():
                "detail": "Ollama 运行时安装完成，正在自动拉起"}
     except Exception as e:
         yield {"done": True, "ok": False, "detail": f"{last_url} → {e}"}
+    finally:
+        _RUNTIME_DL_BUSY = False
 
 
 def import_gguf(path: str, name: str) -> tuple[bool, str]:
