@@ -80,6 +80,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           R=${{ github.repository }}
+          cp 1_Pooling/config.json pooling_config.json
           gh release view bge-m3-v1 -R $R || \
             gh release create bge-m3-v1 -R $R --title "BGE-M3 镜像 bge-m3-v1" \
               --notes "runner 从 HF 官方服务端搬运；pytorch_model.bin 分片 part_*，按序拼接还原"
@@ -87,5 +88,5 @@ jobs:
             config.json config_sentence_transformers.json modules.json \
             sentence_bert_config.json special_tokens_map.json tokenizer_config.json \
             sentencepiece.bpe.model tokenizer.json \
-            "1_Pooling/config.json#pooling_config.json" \
+            pooling_config.json \
             pytorch_model.bin.part_* --clobber
