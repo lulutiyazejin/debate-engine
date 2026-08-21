@@ -203,4 +203,6 @@
 - 运行时一键装：后端 +POST /api/config/ollama/install-runtime（NDJSON 流）：httpx.stream 拉 ollama.com/download/OllamaSetup.exe（代理三态），.part 续传，Inno /VERYSILENT 静默免管理员；ollama_exe_path() 探 PATH+LOCALAPPDATA\Programs\Ollama；status +has_binary；前端未装时显「一键安装（官方包·代理）」primary 钮+进度，装完自动 serve()。实测 system 代理下进度事件正常。
 - 下载反馈：pullModel/runStream 点击即 toast（开始拉取/开始下载），未运行/未装时给指引 toast，杜绝「点了没反应」。
 - 服务端搬运：+.github/workflows/mirror-assets.yml（workflow_dispatch）：runner 从 PyPI 官方 pip download 打 ocr/docling zip 传 components-v1（docling 用 cpu torch 索引控体积）；bge-m3 从 HF 官方拉 10 件，pytorch_model.bin 2.27GB 超单资产 2GiB → split 1900M 分片传 bge-m3-v1。全程不经本机。
+- 搬运实测：首轮两 job 挂（gh 无 checkout 上下文→-R 修复）；次轮 components 成、bge-m3 挂（gh 「file#name」的 # 是 label 不是 name→cp 改名修复）；三轮全绿：components-v1 得 ocr 98MB/docling 316MB，bge-m3-v1 得 11 件含 part_aa 1900MB+part_ab 266MB。
+- docling 装后实测：软件内 /api/components/docling/install 全链路 done ok=true（5MB/s，装完热生效）——组件下载三件（ocr/docling/bge-m3）全部可用。
 - 编译：tsc 0 错误；pytest 77 passed；重装 Z: 验证。
