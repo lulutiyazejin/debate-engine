@@ -15,6 +15,7 @@ import KbSection from "./settings/sections/KbSection";
 import StanceSection from "./settings/sections/StanceSection";
 import DiagSection from "./settings/sections/DiagSection";
 import UiSection from "./settings/sections/UiSection";
+import FontSection from "./settings/sections/FontSection";
 
 const SECTIONS = [
   { key: "providers", label: "模型服务商" },
@@ -26,6 +27,7 @@ const SECTIONS = [
   { key: "kb", label: "知识库" },
   { key: "stancemgr", label: "立场管理" },
   { key: "skills", label: "知识文件" },
+  { key: "font", label: "字体管理" },   // 0.1.7 项 11
   { key: "diag", label: "诊断与日志" },
   { key: "ui", label: "界面" },
   { key: "about", label: "软件信息" },
@@ -46,6 +48,14 @@ export default function SettingsPanel({ notify }: Props) {
   const [tick, setTick] = useState(0);          // 分区自取数据的刷新脉冲
   const navRef = useRef<HTMLDivElement>(null);
 
+  // 0.1.8 S2：DiagSection 数据源
+  const [embedderInfo, setEmbedderInfo] = useState<{
+    impl: string; model: string; is_fallback: boolean
+  } | null>(null);
+  const [componentsList, setComponentsList] = useState<{
+    name: string; state: string
+  }[]>([]);
+
   const refresh = useCallback(() => {
     api.get<{ providers: Provider[] }>("/api/config/providers")
       .then((r) => setProviders(r.providers)).catch(() => {});
@@ -58,6 +68,13 @@ export default function SettingsPanel({ notify }: Props) {
     api.get<{ settings_path: string; data_root: string;
               components_dir?: string; models_dir?: string }>("/api/config/paths")
       .then(setPaths).catch(() => {});
+    // S2 降级状态一览
+    try { api.get("/api/components")
+      .then((r: any) => {
+        setEmbedderInfo({ impl: r.embedder.impl, model: r.embedder.model,
+                          is_fallback: r.embedder.is_fallback });
+        setComponentsList(r.components.map((c: any) => ({ name: c.name, state: c.state })));
+      }).catch(() => {}); } catch {}
     setTick((t) => t + 1);
   }, []);
   useEffect(refresh, [refresh]);
@@ -140,10 +157,19 @@ export default function SettingsPanel({ notify }: Props) {
             立场 Skill（stances/*.md）都是知识库 skills 目录下的普通 Markdown，
             用任何编辑器修改保存后，下次生成即生效。
           </p>
+          {/* 0.1.8 Q7 顺手：一键直达 skills 目录 */}
+          <button onClick={() => api.post("/api/files/reveal?kind=skills", {})
+            .catch((e) => notify(`打开失败: ${e}`))}>打开 skills 目录</button>
+        </div>
+
+        {/* 0.1.7 项 11：字体管理 */}
+        <div className="panel settings" id="sec-font">
+          <FontSection notify={notify} tick={tick} />
         </div>
 
         <div className="panel settings" id="sec-diag">
-          <DiagSection providers={providers} tasks={tasks} />
+          <DiagSection providers={providers} tasks={tasks}
+                       embedder={embedderInfo} components={componentsList} />
         </div>
 
         <div className="panel settings" id="sec-ui">

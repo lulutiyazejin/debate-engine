@@ -16,12 +16,14 @@ from storage.skill_loader import _check_injection, get_skill_loader
 
 router = APIRouter(prefix="/api", tags=["stances"])
 
-# 界面显示的中文名剥掉 SKILL: 前缀（决策 B8）
+# 界面显示的中文名剥掉 SKILL: 前缀（决策 B8）；0.1.7 项 1：再剥括号长尾
+# （如「（红队/研究对象限定）」——该语义保留在 skill 正文 Prompt 模板段）
 _TITLE_PREFIX = re.compile(r"^SKILL[:：]\s*")
+_TITLE_PAREN = re.compile(r"[（(][^）)]*[）)]")
 
 
 def _display_title(title: str) -> str:
-    return _TITLE_PREFIX.sub("", title).strip()
+    return _TITLE_PAREN.sub("", _TITLE_PREFIX.sub("", title)).strip()
 
 
 @router.get("/stances")
@@ -96,17 +98,32 @@ def import_stance(req: StanceImport):
             "title": _display_title(stances[req.name].title)}
 
 
+@router.get("/stances/{name}/usage")
+def stance_usage(name: str):
+    """0.1.8 M4：删立场前查挂靠文档数（前端确认弹窗文案用）。"""
+    from api.deps import get_db
+    n = get_db().conn.execute(
+        "SELECT COUNT(*) FROM documents WHERE stance=? AND deleted_at IS NULL",
+        (name,)).fetchone()[0]
+    return {"name": name, "doc_count": int(n)}
+
+
 @router.delete("/stances/{name}")
 def delete_stance(name: str):
-    """删除手动导入的立场（预置立场保护不可删）。"""
+    """删除手动导入的立场（预置立场保护不可删）。
+    0.1.8 M4：返回挂靠文档数，前端提示「将显示为未分类」。"""
     if name in _BUILTIN_STANCES:
         raise HTTPException(422, f"{name} 是随包预置立场，不可删除")
     p = config.SKILLS_PATH / "stances" / f"{name}.skill.md"
     if not p.exists():
         raise HTTPException(404, f"立场 {name} 不存在")
+    from api.deps import get_db
+    n = get_db().conn.execute(
+        "SELECT COUNT(*) FROM documents WHERE stance=? AND deleted_at IS NULL",
+        (name,)).fetchone()[0]
     p.unlink()
     get_skill_loader().stances(reload=True)
-    return {"ok": True, "name": name}
+    return {"ok": True, "name": name, "orphaned_docs": int(n)}
 
 
 @router.get("/stances/template")

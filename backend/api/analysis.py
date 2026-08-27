@@ -45,12 +45,35 @@ def compare(req: CompareRequest):
 
 class BuildRelationsRequest(BaseModel):
     doc_ids: list[str] | None = None
+    mode: str | None = None  # 0.1.9 E1: full|incremental
 
 
 @router.post("/relations/build")
 def build_relations(req: BuildRelationsRequest):
-    """对齐配对判定并写回 arg_units 关系边（图谱数据源）。"""
-    return _align().build_relations(req.doc_ids)
+    """对齐配对判定并写回 arg_units 关系边（图谱数据源）。
+    0.1.9 E1: mode=None(全库)/full(全量重建)/incremental(新×全库交叉)。"""
+    return _align().build_relations(req.doc_ids, mode=req.mode)
+
+
+@router.get("/relations/pending_count")
+def relations_pending_count():
+    """0.1.9 E1：待更新（relations_at IS NULL）文档数，供前端「更新新增（N）」按钮。"""
+    return {"count": get_db().count_relations_pending()}
+
+
+@router.get("/coords/pending_count")
+def coords_pending_count():
+    """0.1.9 L3：坐标疑似未提取（缺失或全 0）文档数，供馆藏工具条黄色角标。
+    与前端 isSuspiciousZero 同义：提取完成（真坐标）后计数归零 → 角标消失。"""
+    db = get_db()
+    rows = db.conn.execute(
+        "SELECT provenance FROM documents WHERE deleted_at IS NULL").fetchall()
+    n = 0
+    for r in rows:
+        c = _coords_of(r["provenance"])
+        if not c or all(v == 0 for v in c.values()):
+            n += 1
+    return {"count": n}
 
 
 @router.get("/graph")
@@ -112,6 +135,35 @@ def logic_chain(anchor: str, stance: str | None = None,
                                 max_nodes=min(max_nodes, 30))
 
 
+@router.get("/chain/procon")
+def chain_procon(ids: str):
+    """0.1.8 N2：主线节点正反子论点——查库内 relation 指向节点的单元，
+    支持/细化/演进→pro 列，攻击/同题对立→con 列（Kialo 式）。"""
+    id_list = [i for i in ids.split(",") if i.strip()][:30]
+    if not id_list:
+        return {"procon": {}}
+    db = get_db()
+    ph = ",".join("?" * len(id_list))
+    rows = db.conn.execute(
+        f"SELECT u.arg_id, u.claim, u.relation, u.target_unit_id, u.doc_id, "
+        f"       d.title FROM arg_units u "
+        f"JOIN documents d ON d.doc_id = u.doc_id AND d.deleted_at IS NULL "
+        f"WHERE u.target_unit_id IN ({ph}) AND u.relation IS NOT NULL",
+        id_list).fetchall()
+    out: dict[str, dict] = {i: {"pro": [], "con": []} for i in id_list}
+    _PRO = {"support", "refine", "evolve"}
+    _CON = {"attack", "oppose"}
+    for r in rows:
+        side = "pro" if r["relation"] in _PRO else (
+            "con" if r["relation"] in _CON else None)
+        if side is None:
+            continue
+        out[r["target_unit_id"]][side].append({
+            "id": r["arg_id"], "claim": r["claim"], "doc_id": r["doc_id"],
+            "doc_title": r["title"], "relation": r["relation"]})
+    return {"procon": out}
+
+
 class ReportRequest(BaseModel):
     topic: str = Field(min_length=2, max_length=500)
     stances: list[str] | None = None
@@ -156,6 +208,10 @@ def coords():
     rows = db.conn.execute(
         "SELECT doc_id,title,author,stance,provenance FROM documents "
         "WHERE deleted_at IS NULL").fetchall()
+    # 0.1.8 M2：待审文档不参与可视化分布
+    _pending = set(db.pending_doc_ids())
+    if _pending:
+        rows = [r for r in rows if r["doc_id"] not in _pending]
     docs = []
     prof: dict[str, dict] = {}   # stance -> {axis: [sum, n]}
     for r in rows:

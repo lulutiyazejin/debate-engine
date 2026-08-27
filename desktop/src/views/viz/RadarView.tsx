@@ -1,7 +1,7 @@
 // J4 立场雷达（PLAN-0.1.5 批 5）：22 轴多边形立场画像，自绘 SVG；
 // 每立场一个半透明多边形，chips 开关叠加对比；颜色走 --stance-N token。
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AXES } from "../../lib/axes";
+import { RADAR_AXES_17, radarValue } from "../../lib/axes";
 import type { StanceProfile } from "../../lib/axes";
 
 interface Props {
@@ -41,11 +41,11 @@ export default function RadarView({ profiles, stanceLabel }: Props) {
 
   const { w, h } = size;
   const cx = w / 2, cy = h / 2, R = Math.max(60, Math.min(w, h) / 2 - 64);
-  const n = AXES.length;
-  // 轴角度：12 点起顺时针；值域 -5..+5 → 半径 0..R（-5 圆心 +5 外圈）
+  const n = RADAR_AXES_17.length;   // 0.1.8 V4：22→17 近义轴合并显示（数据不动）
+  // 0.1.8 V1: 值域 -5..+5 → 显示 0-10（中心 0/边缘 10）
   const pt = (i: number, v: number) => {
     const ang = -Math.PI / 2 + (i * 2 * Math.PI) / n;
-    const r = ((Math.max(-5, Math.min(5, v)) + 5) / 10) * R;
+    const r = ((Math.max(-5, Math.min(5, v)) + 5) / 10) * R;  // -5→圆心，+5→外圈
     return [cx + r * Math.cos(ang), cy + r * Math.sin(ang)];
   };
 
@@ -74,23 +74,35 @@ export default function RadarView({ profiles, stanceLabel }: Props) {
           ? <div className="empty-state"><p>暂无立场画像</p>
               <p className="muted small">入库文档带 22 轴坐标后，按立场聚合出画像多边形。</p></div>
           : <svg width={w} height={h}>
-              {/* 同心参考环（-5 / -2.5 / 0 / 2.5 / 5 五档） */}
+              {/* 同心参考环（0-10 刻度：四档） */}
               {[0.25, 0.5, 0.75, 1].map((k) => (
                 <circle key={k} cx={cx} cy={cy} r={R * k} className="viz-ring" />
               ))}
-              {AXES.map((a, i) => {
+              {/* 0.1.8 V1：刻度数字只标 12 点方向一条轴（0/2.5/5/7.5/10） */}
+              {[0, 0.25, 0.5, 0.75, 1].map((k) => (
+                <text key={`rk${k}`} x={cx + 4} y={cy - R * k - 2}
+                      className="viz-axis-tag">{k * 10}</text>
+              ))}
+              {/* 旁注行 */}
+              <text x={cx} y={cy - R * 1.15} textAnchor="middle" className="viz-cap">
+                0-10 刻度：0=最左倾/否定端 · 10=最右倾/肯定端（真值 -5..+5 平移）
+              </text>
+              {RADAR_AXES_17.map((a, i) => {
                 const [x2, y2] = pt(i, 5);
                 const [lx, ly] = [cx + (x2 - cx) * 1.09, cy + (y2 - cy) * 1.09];
                 return (
-                  <g key={a.key}>
+                  <g key={a.label}>
                     <line x1={cx} y1={cy} x2={x2} y2={y2} className="viz-spoke" />
                     <text x={lx} y={ly} textAnchor="middle" className="viz-axis-tag">
-                      {a.label}</text>
+                      {a.label}
+                      {a.members.length > 1 &&
+                        <title>{"合并轴：" + a.members.map((m) => m.key).join(" + ")}</title>}
+                    </text>
                   </g>
                 );
               })}
               {usable.filter((p) => active.includes(p.stance)).map((p) => {
-                const d = AXES.map((a, i) => pt(i, p.avg[a.key] ?? 0))
+                const d = RADAR_AXES_17.map((a, i) => pt(i, radarValue(p.avg, a)))
                   .map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`)
                   .join(" ") + " Z";
                 return (

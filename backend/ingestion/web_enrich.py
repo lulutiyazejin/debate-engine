@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -77,7 +78,7 @@ def _try_wikipedia(term: str, lang: str) -> dict | None:
     r = _get(url)
     if r.status_code != 200:
         return None
-    data = r.json()
+    data = json.loads(r.content)  # 0.1.8 S1：bytes 直入，防 httpx 编码推断乱码
     extract = data.get("extract") or ""
     if not extract:
         return None

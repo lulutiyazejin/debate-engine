@@ -4,11 +4,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../api";
 import { askConfirm } from "../../components/AppDialog";
-import { ndjsonPost, fmtSpeed } from "../../lib/ndjson";
+import { ndjsonPost, ndjsonPostResume, fmtSpeed } from "../../lib/ndjson";
 
 interface CompRow {
   name: string; label: string; kind: string; size_hint: string;
-  desc: string; state: "missing" | "installed" | "disabled"; homepage: string;
+  desc: string; state: "missing" | "installed" | "disabled" | "lib-missing"; homepage: string;
 }
 // 补丁项 7：MinerU 额外状态
 interface MineruInstallInfo {
@@ -22,7 +22,9 @@ interface CompList {
   reembed_pending: number;
 }
 
-const STATE_LABEL = { missing: "未安装", installed: "已安装", disabled: "已禁用" } as const;
+// 0.1.8 S2：lib-missing = 模型文件齐但 FlagEmbedding 运行库缺（冻结版旧包常态）
+const STATE_LABEL = { missing: "未安装", installed: "已安装", disabled: "已禁用",
+                      "lib-missing": "缺运行库" } as const;
 
 export default function ComponentsSection({ notify }: { notify: (msg: string) => void }) {
   const [data, setData] = useState<CompList | null>(null);
@@ -52,8 +54,12 @@ export default function ComponentsSection({ notify }: { notify: (msg: string) =>
     const ctl = new AbortController();
     ctlRef.current = ctl; abortKind.current = "";
     let last = 0;
+    // 0.1.8 S3：pip 类安装（mineru/补运行库）走 BgTask，断流 2s 自动重连续看；
+    // 取消钮另走 cancel 端点真杀任务。普通下载流仍用断流=暂停语义。
+    const isBgTask = key === "mineru" || label === "安装运行库";
+    const post = isBgTask ? ndjsonPostResume : ndjsonPost;
     try {
-      await ndjsonPost(path, {}, (evt) => {
+      await post(path, {}, (evt) => {
         if (evt.done) notify(evt.detail || (evt.ok ? "完成" : "失败"));
         // 补丁项 7：MinerU 安装也更新 mineruInfo 供卡片显示
         else {
@@ -125,7 +131,7 @@ export default function ComponentsSection({ notify }: { notify: (msg: string) =>
           <div className="provider-head">
             <b>{c.label}　<span className="muted small">{c.size_hint}</span></b>
             <span className={"badge " + (c.state === "installed" ? "ok"
-                             : c.state === "disabled" ? "warn" : "")}>
+                             : c.state === "disabled" || c.state === "lib-missing" ? "warn" : "")}>
               {STATE_LABEL[c.state]}</span>
           </div>
           <div className="muted small">{c.desc}</div>
@@ -177,8 +183,10 @@ export default function ComponentsSection({ notify }: { notify: (msg: string) =>
             ) : (
               <>
                 <button disabled={!!busy}
-                        onClick={() => runStream(c.name, `/api/components/${c.name}/install`, c.label)}>
-                  {c.state === "missing" ? "下载并启用" : "重新下载"}</button>
+                        onClick={() => runStream(c.name, `/api/components/${c.name}/install`,
+                          c.state === "lib-missing" ? "安装运行库" : c.label)}>
+                  {c.state === "missing" ? "下载并启用"
+                   : c.state === "lib-missing" ? "安装运行库" : "重新下载"}</button>
                 {c.state !== "missing" && (
                   <>
                     <button disabled={!!busy} onClick={() => toggle(c)}>

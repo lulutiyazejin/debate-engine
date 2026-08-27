@@ -65,14 +65,22 @@ export default function RebutPanel({ stances, prefill, setSide, setRightOpen,
   }, [notify]);
 
   useEffect(() => {
+    // 0.1.8 R3: 记忆上次选择，缺省用 stances[0]；允许空字符串/"none"
+    const stored = localStorage.getItem("last_stance");
     if (prefill.stance) setStance(prefill.stance);
+    else if (!stance && stored && stances.some(s => s.name === stored)) setStance(stored);
+    else if (!stance && stances.length) setStance(stances[0].name);
+  }, [stances, stance]);
+
+  useEffect(() => {
     if (prefill.argument) setArgument(prefill.argument);
     if (prefill.style) setStyle(prefill.style);
   }, [prefill]);
 
   useEffect(() => {
-    if (!stance && stances.length) setStance(stances[0].name);
-  }, [stances, stance]);
+    // 0.1.8 R3: 选立场后记 localStorage（包括空表示“无立场”）
+    if (typeof stance !== "undefined") localStorage.setItem("last_stance", stance || "none");
+  }, [stance]);
 
   // 流式输出时自动滚底
   useEffect(() => {
@@ -188,6 +196,7 @@ export default function RebutPanel({ stances, prefill, setSide, setRightOpen,
         {!stanceFree && (
           <label>立场
             <select value={stance} onChange={(e) => setStance(e.target.value)}>
+              <option value="none">无立场（日常输出）</option>
               {stances.map((s) => <option key={s.name} value={s.name}>{s.label || s.name}</option>)}
             </select>
           </label>

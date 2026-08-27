@@ -32,8 +32,13 @@ export default function StanceSection({ notify, onChanged, tick }: Props) {
   };
 
   const delStance = async (name: string) => {
-    if (!(await askConfirm({ title: `删除立场 ${name}？`,
-        body: "其名下文档不会删除，只失去检索偏好。", danger: true }))) return;
+    // 0.1.8 M4：删前查挂靠文档数，下游影响写进确认文案
+    const n = await api.get<{ doc_count: number }>(`/api/stances/${name}/usage`)
+      .then((r) => r.doc_count).catch(() => 0);
+    const body = n > 0
+      ? `该立场下有 ${n} 篇文档，删除后它们将显示为未分类。确定删除？`
+      : "其名下文档不会删除，只失去检索偏好。";
+    if (!(await askConfirm({ title: `删除立场 ${name}？`, body, danger: true }))) return;
     try { await api.del(`/api/stances/${name}`); notify("已删除并热生效"); onChanged(); }
     catch (e) { notify(`删除失败: ${e}`); }
   };

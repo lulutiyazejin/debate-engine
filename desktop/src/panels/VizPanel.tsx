@@ -3,6 +3,7 @@
 // coords 数据源三视图共享，进面首次拉取；力导向保持 GraphPanel 原样零改动。
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { api } from "../api";
+import { stanceLabel as _stanceLabel } from "../lib/stance";
 import type { DocRow } from "../App";
 import SegmentedSlider from "../components/SegmentedSlider";
 import GraphPanel from "./GraphPanel";
@@ -20,6 +21,8 @@ interface Props {
   active: boolean;
   onChain?: (anchor: string) => void;
   onShowDoc?: (doc: DocRow) => void;
+  coordsVersion?: number;   // 0.1.7 项 3：重提取完成后父层 bump → 强制失效重拉
+  focusDocId?: string | null;   // 0.1.8 V7：局部图谱入口（透传 GraphPanel）
 }
 
 const MODES = [
@@ -31,13 +34,18 @@ const MODES = [
 ];
 
 export default function VizPanel({ stances, docs, notify, active,
-                                   onChain, onShowDoc }: Props) {
+                                   onChain, onShowDoc, coordsVersion = 0,
+                                   focusDocId }: Props) {
   const [mode, setMode] = useState("force");
+  // 0.1.8 V7：外部局部图谱入口 → 切到力导向视图
+  useEffect(() => {
+    if (focusDocId) setMode("force");
+  }, [focusDocId]);
   const [coordDocs, setCoordDocs] = useState<CoordDoc[] | null>(null);
   const [profiles, setProfiles] = useState<StanceProfile[]>([]);
 
-  const stanceLabel = useCallback((name: string) =>
-    stances.find((s) => s.name === name)?.label || name, [stances]);
+  // viz:cb_stanceLabel
+  const cb_stanceLabel = useCallback((name: string) => _stanceLabel(name, stances), [stances]);
 
   // coords 懒拉取：首次切到坐标类视图才取；docs 变化（入库/删除）失效重取
   useEffect(() => {
@@ -47,7 +55,8 @@ export default function VizPanel({ stances, docs, notify, active,
       .then((r) => { setCoordDocs(r.docs); setProfiles(r.profiles); })
       .catch((e) => notify(`坐标数据加载失败: ${e}`));
   }, [active, mode, coordDocs, notify]);
-  useEffect(() => { setCoordDocs(null); }, [docs.length]);
+  // 项 3：docs 数量变化（入库/删除）或重提取完成（coordsVersion）都强制失效
+  useEffect(() => { setCoordDocs(null); }, [docs.length, coordsVersion]);
 
   const scatter = <ScatterView docs={coordDocs ?? []} />;
 
@@ -60,7 +69,8 @@ export default function VizPanel({ stances, docs, notify, active,
       <div style={{ display: mode === "force" ? "contents" : "none" }}>
         <GraphPanel stances={stances} docs={docs} notify={notify}
                     active={active && mode === "force"}
-                    onChain={onChain} onShowDoc={onShowDoc} />
+                    onChain={onChain} onShowDoc={onShowDoc}
+                    focusDocId={focusDocId} />
       </div>
       {mode === "cube" && (
         <Suspense fallback={<div className="empty-state"><p>立方视图加载中…</p></div>}>
@@ -70,10 +80,10 @@ export default function VizPanel({ stances, docs, notify, active,
       )}
       {mode === "scatter" && scatter}
       {mode === "radar" && (
-        <RadarView profiles={profiles} stanceLabel={stanceLabel} />
+        <RadarView profiles={profiles} stanceLabel={cb_stanceLabel} />
       )}
       {mode === "cross" && (
-        <CrossTabView docs={docs} stanceLabel={stanceLabel} notify={notify}
+        <CrossTabView docs={docs} stanceLabel={cb_stanceLabel} notify={notify}
                       active={active && mode === "cross"} />
       )}
     </div>

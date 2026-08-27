@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Debate Engine · 0.1.7 UI 示意</title>
+<style>
+:root{
+  --bg:#e8e6df; --card:#f0eee7; --card2:#e6e4dc; --hair:#d3d0c6; --hair2:#c2beb2;
+  --tx:#2b2925; --tx2:#6b675e; --tx3:#98938a;
+  --accent:#17663a; --accent-dim:#17663a22; --focus:#e0662d;
+  --s1:#c25445; --s2:#4f7fb5; --s3:#d9a441; --s4:#56b8ba; --s5:#9a7fb5; --s0:#8a8378;
+  --mono:"IBM Plex Mono",Consolas,monospace;
+}
+body.mono{ --s1:#4a4a4a; --s2:#6e6e6e; --s3:#8f8f8f; --s4:#ababab; --s5:#c4c4c4; --s0:#b5b1a8; --accent:#e0662d; }
+*{box-sizing:border-box; margin:0}
+body{background:var(--bg); color:var(--tx); font:13px/1.6 "Noto Sans SC","Source Han Sans SC","Microsoft YaHei",sans-serif; padding:0 0 80px}
+header{position:sticky; top:0; z-index:9; background:var(--card); border-bottom:1px solid var(--hair);
+  display:flex; align-items:center; gap:14px; padding:10px 22px}
+header b{font-size:15px} header .sub{color:var(--tx2); font-size:12px}
+header .sp{flex:1}
+button{font:inherit; cursor:pointer; background:var(--card); color:var(--tx); border:1px solid var(--hair2);
+  border-radius:6px; padding:4px 12px; height:28px}
+button:hover{background:var(--card2)}
+button.pri{background:var(--accent); color:#fff; border-color:var(--accent)}
+button.chip-on{border-color:currentColor; background:var(--accent-dim)}
+.wrap{max-width:1180px; margin:0 auto; padding:0 22px}
+section{background:var(--card); border:1px solid var(--hair); border-radius:10px; margin-top:18px; padding:16px 18px}
+section h2{font-size:15px; display:flex; align-items:center; gap:8px; margin-bottom:4px}
+.tag{font:11px var(--mono); letter-spacing:.08em; color:#fff; background:var(--accent); border-radius:4px; padding:1px 7px}
+body.mono .tag{background:var(--focus)}
+.note{color:var(--tx2); font-size:12px; margin-bottom:12px}
+.note em{font-style:normal; color:var(--accent); }
+.row{display:flex; gap:18px; flex-wrap:wrap; align-items:flex-start}
+.col{flex:1; min-width:320px}
+.mini-h{font-size:12px; color:var(--tx3); margin:6px 0 4px; letter-spacing:.05em}
+svg text{font-family:inherit}
+.num{font-family:var(--mono)}
+/* 旁注三件套 */
+.anno{font:11px var(--mono); color:var(--tx3); text-align:right; margin:-4px 0 6px}
+/* 下拉对比 */
+.dd{border:1px solid var(--hair2); border-radius:6px; background:#faf9f5; min-width:250px}
+.dd .hd{padding:6px 10px; border-bottom:1px solid var(--hair); display:flex; justify-content:space-between; color:var(--tx)}
+.dd ul{list-style:none}
+.dd li{padding:5px 10px; font-size:12.5px}
+.dd li:hover{background:var(--card2)}
+.dd li.sel{background:#5b5b56; color:#fff}
+.strike{color:var(--tx3); text-decoration:line-through}
+/* 进度条 */
+.mcard{border-bottom:1px solid var(--hair); padding:10px 2px}
+.mcard .t{display:flex; justify-content:space-between; align-items:baseline}
+.mcard .meta{color:var(--tx2); font-size:12px; margin:2px 0 8px}
+.pbar{height:8px; background:var(--card2); border-radius:4px; overflow:hidden; border:1px solid var(--hair)}
+.pbar i{display:block; height:100%; background:var(--accent); width:45%; animation:grow 2.4s ease-out}
+@keyframes grow{from{width:6%}}
+.ptxt{font:12px var(--mono); color:var(--tx2); margin-top:5px}
+/* 角标 */
+.badge{font-size:11px; border-radius:4px; padding:0 6px; border:1px solid var(--hair2); color:var(--tx2); background:var(--card2)}
+.badge.warn{color:#8a5a17; border-color:#c9a25a}
+/* 字体卡 */
+.fcard{display:flex; align-items:center; gap:10px; border:1px solid var(--hair); border-radius:8px; padding:8px 12px; margin-top:8px; background:#faf9f5}
+.fcard .fn{flex:1} .fcard .fn b{font-size:13px} .fcard .fn span{display:block; color:var(--tx3); font-size:11px}
+/* 交叉表 */
+table{border-collapse:collapse; font-size:12.5px; width:100%}
+th,td{border:1px solid var(--hair); padding:5px 10px; text-align:center}
+th{background:var(--card2); font-weight:600}
+td.hot{background:#7ea88d; color:#fff}
+/* tip */
+#tip{position:fixed; z-index:99; pointer-events:none; background:#33312c; color:#f2f0ea; font-size:12px;
+  padding:5px 9px; border-radius:6px; display:none; max-width:280px; line-height:1.5}
+.ctl{display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:6px 0}
+.ctl label{font-size:12px; color:var(--tx2)}
+select{font:inherit; height:28px; border:1px solid var(--hair2); border-radius:6px; background:#faf9f5; color:var(--tx)}
+.guide{border:1px dashed var(--hair2); background:var(--card2); border-radius:8px; color:var(--tx2);
+  font-size:12px; padding:8px 12px; margin-bottom:8px}
+</style>
+</head>
+<body>
+<header>
+  <b>Debate Engine</b><span class="sub">0.1.7 UI 示意 · 非真实数据 · 展示改后形态</span>
+  <span class="sp"></span>
+  <button id="themeBtn">Mono 模式</button>
+</header>
+<div class="wrap">
+
+<section>
+  <h2><span class="tag">项1</span>立场下拉去括号</h2>
+  <p class="note">括号注记（红队/研究对象限定）<em>不再出现在任何下拉/标签</em>，限定语义保留在 skill 正文 Prompt 段。</p>
+  <div class="row">
+    <div class="col"><div class="mini-h">改前</div>
+      <div class="dd"><div class="hd"><span>立场</span><span>▾</span></div><ul>
+        <li>环保主义立场</li><li class="sel">法西斯主义立场 <span class="strike">（红队/研究对象限定）</span></li>
+        <li>女权主义立场</li><li>凯恩斯主义立场</li></ul></div></div>
+    <div class="col"><div class="mini-h">改后（0.1.7）</div>
+      <div class="dd"><div class="hd"><span>立场</span><span>▾</span></div><ul>
+        <li>环保主义立场</li><li class="sel">法西斯主义立场</li>
+        <li>女权主义立场</li><li>凯恩斯主义立场</li></ul></div></div>
+  </div>
+</section>
+
+<section>
+  <h2><span class="tag">项8</span>模型下载进度条 · 通栏三件套</h2>
+  <p class="note">进度从卡片标题行按钮位移到<em>独立通栏行</em>；文字=「% · 已下/总 · 速度」，Ollama 原始哈希状态仅留悬停。</p>
+  <div class="mcard">
+    <div class="t"><span>Qwen3.5 35B-A3B（首推 · 24GB 甜点） <code>qwen3.5:35b-a3b</code> <span class="badge" style="color:var(--accent);border-color:var(--accent)">荐</span></span>
+      <span class="badge">魔搭源直连</span></div>
+    <div class="meta">显存(Q4) 21GB · 窗 64k · 速度3B 档 · 质量32B 档 · 中文极佳</div>
+    <div class="pbar"><i></i></div>
+    <div class="ptxt">45% · 9.2/20.4GB · 37MB/s</div>
+  </div>
+</section>
+
+<section>
+  <h2><span class="tag">项4</span>力导向 · 三态引导 + 孤立节点过滤</h2>
+  <p class="note">有节点 0 边时不再是一片沉默的散点：<em>引导横幅</em>说明该做什么；借 obsidian 加「孤立节点」chip。</p>
+  <div class="guide">ⓘ 当前 10 节点 · 0 边。点「生成/更新关系边」建立连线；离线时仅否定词规则可判「同题对立」，配置模型后判全六种。</div>
+  <div class="ctl">
+    <button class="pri">生成/更新关系边</button>
+    <button id="orphanBtn" class="chip-on" style="color:var(--s0)">孤立节点 6</button>
+    <span class="badge">支持 1</span><span class="badge">攻击 1</span><span class="badge">同题对立 0</span>
+  </div>
+  <svg id="forceSvg" width="100%" height="240" viewBox="0 0 700 240"></svg>
+</section>
+
+<section>
+  <h2><span class="tag">项5+10</span>坐标散点 · 旁注三件套 + 可数刻度 + 零值角标</h2>
+  <div class="anno">N=4 本 · 轴值 -5〜+5 · 坐标为入库提取（重提取后）</div>
+  <p class="note">左=重提取后（点散开、刻度可数）；右=旧数据态（全零叠原点 → <em>灰显+「疑似未提取」角标</em>，不再误导）。</p>
+  <div class="row">
+    <div class="col"><div class="mini-h">改后（重提取后）</div><svg id="scatAfter" width="100%" height="300" viewBox="0 0 460 300"></svg></div>
+    <div class="col"><div class="mini-h">旧数据态（角标）</div><svg id="scatBefore" width="100%" height="300" viewBox="0 0 460 300"></svg></div>
+  </div>
+</section>
+
+<section>
+  <h2><span class="tag">项10</span>立场雷达 · 凸角 + Glance 旁注（借 8values 结论先行）</h2>
+  <p class="note">坐标修复后多边形出凸角；<em>悬停 chip</em> 在旁注行列 |均值| 前三轴文字总结，几秒看懂立场指纹。</p>
+  <div class="ctl" id="radarChips"></div>
+  <div class="anno" id="radarAnno" style="text-align:left;min-height:18px">悬停立场 chip 看 Glance 旁注 →</div>
+  <svg id="radarSvg" width="100%" height="420" viewBox="0 0 640 420"></svg>
+</section>
+
+<section>
+  <h2><span class="tag">项6+7</span>3D 立方 · 中心立场 + 距离虚线 + 默认放大</h2>
+  <p class="note">选中心立场后其他立场<em>移到相对位置</em>；「距离虚线」开关<em>默认关</em>，开启后中心→小立方虚线标<em>真实相对距离</em>（未夹壁值）；默认立方更大。雷达维度显示层合并 22→17（技术/AI、全球化/外交、经济正义、权力/组织、身份/性别 五组取均值），可展开细轴回 22。</p>
+  <div class="ctl">
+    <label>中心立场</label>
+    <select id="centerSel"><option value="">原点（绝对坐标）</option></select>
+    <span class="badge" id="centerNote">绝对坐标</span>
+    <label style="margin-left:12px"><input type="checkbox" id="distChk"> 距离虚线（默认关）</label>
+  </div>
+  <div class="anno">轴：所有制 × 政治权力 × 帝国主义 · 悬停小立方看真值</div>
+  <svg id="cubeSvg" width="100%" height="520" viewBox="0 0 760 520"></svg>
+</section>
+
+<section>
+  <h2><span class="tag">项5</span>交叉分析 · 读法引导</h2>
+  <p class="note">行=立场 × 列=所选轴五档；<em>看分布形状</em>：马列堆左（公有端）、新保守堆右（私有端）= 意识形态指纹。修复前 10 格全中档的「假数据」态不再出现。</p>
+  <table><tr><th>立场 ╲ 所有制</th><th>-5〜-3</th><th>-3〜-1</th><th>-1〜1</th><th>1〜3</th><th>3〜5</th><th>合计</th></tr>
+  <tr><td style="text-align:left">马列毛主义立场</td><td class="hot">6</td><td>3</td><td>1</td><td>0</td><td>0</td><td>10</td></tr>
+  <tr><td style="text-align:left">新保守主义立场</td><td>0</td><td>0</td><td>1</td><td>2</td><td class="hot">3</td><td>6</td></tr></table>
+</section>
+
+<section>
+  <h2><span class="tag">项9</span>脉络时间轴 · 风格统一</h2>
+  <p class="note"><em>中文泳道</em>、空泳道折叠、宽度适配容器（无横滚）、泳道撑满无底部大空白；悬停即时 tip，点击开档案。</p>
+  <svg id="tlSvg" width="100%" height="260" viewBox="0 0 900 260"></svg>
+</section>
+
+<section>
+  <h2><span class="tag">项11</span>设置 · 字体管理</h2>
+  <p class="note">OFL 推荐字体在线下载（多源续传）、本地导入、应用/删除<em>热生效</em>；canvas 标签同步换字体（项13）。</p>
+  <div class="fcard"><div class="fn"><b>思源黑体 SC</b><span>OFL · 18.2MB · 正文首选 · 魔搭源</span></div>
+    <span class="badge" style="color:var(--accent);border-color:var(--accent)">已应用</span><button>删除</button></div>
+  <div class="fcard"><div class="fn"><b>IBM Plex Mono</b><span>OFL · 1.1MB · 刻度/数字</span></div><button class="pri">下载</button></div>
+  <div class="fcard"><div class="fn"><b>Inter</b><span>OFL · 0.3MB · 西文</span></div><button class="pri">下载</button></div>
+  <div class="ctl" style="margin-top:10px"><button>导入本地字体…</button><span class="badge">无外挂时回落系统字体栈（雅黑）</span></div>
+</section>
+
+</div>
+<div id="tip"></div>
+<script>
+const $=s=>document.querySelector(s);
+const S={ml:{n:"马列毛主义立场",c:"var(--s1)",co:[-4,-3,-4]},an:{n:"无政府主义立场",c:"var(--s2)",co:[-1,4,1]},sd:{n:"社会民主主义立场",c:"var(--s3)",co:[-2,1,0]},nc:{n:"新保守主义立场",c:"var(--s4)",co:[3,1,2]}};
+const tip=$("#tip");
+function showTip(e,html){tip.innerHTML=html;tip.style.display="block";tip.style.left=(e.clientX+14)+"px";tip.style.top=(e.clientY+10)+"px";}
+function hideTip(){tip.style.display="none";}
+document.addEventListener("mousemove",e=>{if(tip.style.display==="block"){tip.style.left=(e.clientX+14)+"px";tip.style.top=(e.clientY+10)+"px";}});
+/* Mono 切换 */
+$("#themeBtn").onclick=()=>{const on=document.body.classList.toggle("mono");$("#themeBtn").textContent=on?"彩色模式":"Mono 模式";drawAll();};
+/* ---- 力导向 ---- */
+const FN=[{x:120,y:60,s:"ml",t:"苏共统治已岌岌可危"},{x:250,y:110,s:"ml",t:"腐败的本质是把全民的…"},{x:420,y:70,s:"an",t:"在私有制社会里没有腐败"},{x:560,y:130,s:"nc",t:"私有产权是反腐基石"},{x:330,y:190,s:"sd",t:"透明制度优于道德说教"}];
+const ISOL=[{x:80,y:180},{x:200,y:40},{x:480,y:200},{x:620,y:50},{x:660,y:190},{x:40,y:90}];
+let showOrphan=true;
+$("#orphanBtn").onclick=e=>{showOrphan=!showOrphan;e.target.classList.toggle("chip-on",showOrphan);drawForce();};
+function drawForce(){const svg=$("#forceSvg");let h="";
+ h+=`<line x1="${FN[0].x}" y1="${FN[0].y}" x2="${FN[1].x}" y2="${FN[1].y}" stroke="var(--accent)" stroke-width="2"/>`;
+ h+=`<line x1="${FN[2].x}" y1="${FN[2].y}" x2="${FN[3].x}" y2="${FN[3].y}" stroke="var(--s1)" stroke-width="2"/>`;
+ FN.forEach(p=>{h+=`<circle cx="${p.x}" cy="${p.y}" r="6" fill="${S[p.s].c}" stroke="#fff" data-t="${p.t}｜${S[p.s].n}"/>`;});
+ if(showOrphan)ISOL.forEach(p=>{h+=`<circle cx="${p.x}" cy="${p.y}" r="5" fill="var(--s0)" opacity=".7"/>`;});
+ h+=`<text x="128" y="52" font-size="10" fill="var(--tx3)">支持</text><text x="430" y="62" font-size="10" fill="var(--tx3)">攻击</text>`;
+ svg.innerHTML=h;
+ svg.querySelectorAll("circle[data-t]").forEach(c=>{c.addEventListener("mouseenter",e=>showTip(e,c.dataset.t));c.addEventListener("mouseleave",hideTip);});}
+/* ---- 散点 ---- */
+function scat(svg,mode){const W=460,H=300,P=40,sx=v=>P+((v+5)/10)*(W-2*P),sy=v=>(H-P)-((v+5)/10)*(H-2*P);
+ let h=`<rect x="${P}" y="${P}" width="${W-2*P}" height="${H-2*P}" fill="none" stroke="var(--hair2)"/>`;
+ for(let v=-5;v<=5;v++){h+=`<line x1="${sx(v)}" y1="${sy(0)}" x2="${sx(v)}" y2="${sy(0)+(v===0?0:4)}" stroke="var(--tx3)"/>`;
+   h+=`<line x1="${sx(0)}" y1="${sy(v)}" x2="${sx(0)+(v===0?0:4)}" y2="${sy(v)}" stroke="var(--tx3)"/>`;}
+ h+=`<line x1="${sx(0)}" y1="${P}" x2="${sx(0)}" y2="${H-P}" stroke="var(--hair2)" stroke-dasharray="3 3"/>`;
+ h+=`<line x1="${P}" y1="${sy(0)}" x2="${W-P}" y2="${sy(0)}" stroke="var(--hair2)" stroke-dasharray="3 3"/>`;
+ h+=`<text x="${P}" y="${sy(0)-6}" font-size="10" fill="var(--tx3)">公有</text><text x="${W-P}" y="${sy(0)-6}" font-size="10" fill="var(--tx3)" text-anchor="end">私有</text>`;
+ h+=`<text x="${sx(0)+6}" y="${H-P+14}" font-size="10" fill="var(--tx3)">集权</text><text x="${sx(0)+6}" y="${P+10}" font-size="10" fill="var(--tx3)">无政府</text>`;
+ h+=`<text x="${W/2}" y="${H-6}" font-size="11" fill="var(--tx2)" text-anchor="middle">所有制</text>`;
+ if(mode==="after"){Object.values(S).forEach(s=>{const x=s.co[0],y=s.co[1];
+   h+=`<circle cx="${sx(x)}" cy="${sy(y)}" r="6" fill="${s.c}" stroke="#fff" data-t="${s.n}｜所有制 ${x} / 政治权力 ${y}"/>`;});}
+ else{h+=`<circle cx="${sx(0)}" cy="${sy(0)}" r="7" fill="var(--s0)" opacity=".55" data-t="4 本叠原点｜坐标全 0＝提取失败兜底"/>`;
+   h+=`<text x="${sx(0)+12}" y="${sy(0)-10}" font-size="11" fill="#8a5a17">⚠ 疑似未提取（4 本）· 可重提取</text>`;}
+ svg.innerHTML=h;
+ svg.querySelectorAll("[data-t]").forEach(c=>{c.addEventListener("mouseenter",e=>showTip(e,c.dataset.t));c.addEventListener("mouseleave",hideTip);});}
+/* ---- 雷达 ---- */
+const AX=["所有制","政治权力","帝国主义","认识论","变革速度","伦理","文化","外交","技术","分配","福利","民主形态","组织","宪政","身份","性别","世俗","本体论","生态","人工智能","全球化","历史观"];
+const RV={ml:[-4,-3,-4,-2,-3,-1,-2,-3,0,-3,-2,-2,-3,-2,-1,0,1,-2,0,0,-2,-3],an:[-1,4,1,2,3,1,2,3,1,0,1,3,4,1,2,3,2,3,1,2,3,2],nc:[3,1,2,3,3,2,3,1,2,2,1,1,1,3,1,0,1,3,1,2,1,2]};
+function radar(){const svg=$("#radarSvg"),W=640,H=420,cx=W/2,cy=H/2,R=150,n=AX.length;
+ const pt=(i,v)=>{const a=-Math.PI/2+i*2*Math.PI/n,r=((Math.max(-5,Math.min(5,v))+5)/10)*R;return[cx+r*Math.cos(a),cy+r*Math.sin(a)];};
+ let h=[.25,.5,.75,1].map(k=>`<circle cx="${cx}" cy="${cy}" r="${R*k}" fill="none" stroke="var(--hair2)"/>`).join("");
+ AX.forEach((a,i)=>{const[x,y]=pt(i,5);h+=`<line x1="${cx}" y1="${cy}" x2="${x}" y2="${y}" stroke="var(--hair)"/>`;
+  h+=`<text x="${cx+(x-cx)*1.12}" y="${cy+(y-cy)*1.12}" font-size="10" fill="var(--tx3)" text-anchor="middle">${a}</text>`;});
+ ["ml","an","nc"].forEach(k=>{const d=RV[k].map((v,i)=>{const[x,y]=pt(i,v);return`${i?"L":"M"}${x.toFixed(1)},${y.toFixed(1)}`;}).join(" ")+" Z";
+  h+=`<path d="${d}" fill="${S[k].c}" fill-opacity=".13" stroke="${S[k].c}" stroke-width="1.6"/>`;});
+ svg.innerHTML=h;}
+function radarChips(){const box=$("#radarChips");box.innerHTML="";
+ ["ml","an","nc"].forEach(k=>{const b=document.createElement("button");b.className="chip-on";b.style.color=S[k].c;
+  b.innerHTML=`<i style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${S[k].c}"></i> ${S[k].n} ${k==="ml"?4:3}`;
+  b.onmouseenter=()=>{const top=AX.map((a,i)=>[a,RV[k][i]]).sort((x,y)=>Math.abs(y[1])-Math.abs(x[1])).slice(0,3)
+    .map(([a,v])=>`${a} ${v>0?"+":""}${v}`).join(" · ");
+   $("#radarAnno").innerHTML=`<b style="color:${S[k].c}">${S[k].n}</b> 指纹：${top}（|均值| 前三轴）`;};
+  b.onmouseleave=()=>{};box.appendChild(b);});}
+/* ---- 立方 ---- */
+function proj(p){const yaw=.7,pitch=-.42,cy=Math.cos(yaw),sy=Math.sin(yaw),cp=Math.cos(pitch),sp=Math.sin(pitch);
+ const x=p[0]*cy+p[2]*sy,z=-p[0]*sy+p[2]*cy,y=p[1],y2=y*cp-z*sp,z2=y*sp+z*cp;
+ const f=80,s=f/(f+(z2/5)*6)*34;return[x*s+380,260-y2*s,z2];}
+const cl=v=>Math.max(-4.5,Math.min(4.5,v));
+function cube(){const sel=$("#centerSel").value,svg=$("#cubeSvg"),showDist=$("#distChk").checked;
+ const C=sel?S[sel].co:[0,0,0];
+ const rel=k=>{const r=S[k].co.map((v,i)=>v-C[i]);return r;};
+ let items=[];const V=[];for(let i=0;i<8;i++)V.push([i&1?5:-5,i&2?5:-5,i&4?5:-5]);
+ const F=[[0,1,3,2,0],[4,5,7,6,0],[0,1,5,4,1],[2,3,7,6,1],[0,2,6,4,2],[1,3,7,5,2]];
+ F.forEach(f=>{const d=f.slice(0,4).map(i=>proj(V[i])),z=d.reduce((s,p)=>s+p[2],0)/4;items.push({z,k:"face",f,d});});
+ let h="";const faces=items.filter(i=>i.k==="face").sort((a,b)=>b.z-a.z);
+ faces.forEach(({f,d})=>{h+=`<path d="M${d.map(p=>p[0]+","+p[1]).join("L")}Z" fill="${["var(--s1)","var(--s2)","var(--s3)"][f[4]]}" opacity=".16"/>`;});
+ for(let i=0;i<8;i++)for(let j=i+1;j<8;j++){const d=i^j;if(d===1||d===2||d===4){const a=proj(V[i]),b=proj(V[j]);
+  h+=`<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="var(--hair2)" stroke-width="1.2"/>`;}}
+ const o=proj([0,0,0]);
+ Object.keys(S).forEach(k=>{const r=rel(k),dc=[cl(r[0]),cl(r[1]),cl(r[2])],p=proj(dc);
+  const dist=Math.sqrt(r[0]**2+r[1]**2+r[2]**2);
+  if(sel&&showDist){h+=`<line x1="${o[0]}" y1="${o[1]}" x2="${p[0]}" y2="${p[1]}" stroke="${S[k].c}" stroke-dasharray="4 4" stroke-width="1.4"/>`;
+   h+=`<text x="${(o[0]+p[0])/2+8}" y="${(o[1]+p[1])/2}" font-size="11" fill="${S[k].c}" class="num">${dist.toFixed(1)}</text>`;}
+  const vs=[];for(let i=0;i<8;i++)vs.push(proj([dc[0]+(i&1?.5:-.5),dc[1]+(i&2?.5:-.5),dc[2]+(i&4?.5:-.5)]));
+  h+=`<path d="M${vs.map(q=>q[0]+","+q[1]).join("L")}Z" fill="${S[k].c}" opacity=".22" stroke="${S[k].c}" stroke-width="1.4" data-t="${S[k].n}｜相对 [${r.map(v=>v>0?"+"+v:v).join(", ")}]｜距中心 ${dist.toFixed(1)}"/>`;
+  h+=`<text x="${p[0]}" y="${p[1]-16}" font-size="12" font-weight="600" fill="${S[k].c}" text-anchor="middle" stroke="var(--card)" stroke-width="3" paint-order="stroke">${S[k].n} · ${k==="ml"?4:3}</text>`;});
+ svg.innerHTML=h;
+ svg.querySelectorAll("[data-t]").forEach(c=>{c.addEventListener("mouseenter",e=>showTip(e,c.dataset.t));c.addEventListener("mouseleave",hideTip);});
+ $("#centerNote").textContent=sel?`相对坐标：以${S[sel].n}为原点`:"绝对坐标";}
+Object.keys(S).forEach(k=>{const o=document.createElement("option");o.value=k;o.textContent=S[k].n;$("#centerSel").appendChild(o);});
+$("#centerSel").onchange=cube;$("#distChk").onchange=cube;
+/* ---- 脉络 ---- */
+function tl(){const svg=$("#tlSvg"),W=900,H=260,P=70,y0=1900,y1=1940,sx=y=>P+((y-y0)/(y1-y0))*(W-P-30);
+ let h="";for(let y=y0;y<=y1;y+=10){h+=`<line x1="${sx(y)}" y1="26" x2="${sx(y)}" y2="${H-20}" stroke="var(--hair)"/>`;
+  h+=`<text x="${sx(y)}" y="18" font-size="10" fill="var(--tx3)" text-anchor="middle" class="num">${y}</text>`;}
+ h+=`<line x1="0" y1="60" x2="${W}" y2="60" stroke="var(--hair)"/>`;
+ h+=`<text x="8" y="110" font-size="11" fill="var(--tx2)">马列毛主义立场</text>`;
+ const NS=[[1902,"列宁：怎么办"],[1907,"土地纲领论争"],[1911,"辛亥评论"],[1916,"国家与革命"],[1919,"论无产阶级专政"],[1925,"论合作社"],[1930,"反对本本主义"],[1937,"矛盾论"]];
+ NS.forEach(([y,t],i)=>{const x=sx(y),yy=110+(i%2)*16;
+  h+=`<circle cx="${x}" cy="${yy}" r="6" fill="var(--s1)" stroke="#fff" data-t="${y} · ${t}"/>`;
+  h+=`<text x="${x+8}" y="${yy-8}" font-size="10" fill="var(--tx3)">${t.slice(0,8)}</text>`;});
+ svg.innerHTML=h;
+ svg.querySelectorAll("[data-t]").forEach(c=>{c.addEventListener("mouseenter",e=>showTip(e,c.dataset.t));c.addEventListener("mouseleave",hideTip);});}
+function drawAll(){drawForce();scat($("#scatAfter"),"after");scat($("#scatBefore"),"before");radar();cube();tl();}
+radarChips();drawAll();
+</script>
+</body>
+</html>

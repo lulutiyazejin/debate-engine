@@ -1,0 +1,287 @@
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+from fastapi import APIRouter, HTTPException, Response, StreamingResponse
+from pydantic import BaseModel, Field
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import config
+from models.embedder import get_embedder, reset_embedder, embedder_status
+
+router = APIRouter(prefix="/api/components", tags=["components"])
+
+_GH = "https://github.com/lulutiyazejin/debate-engine/releases/download/components-v1"
+_MS = "https://modelscope.cn/models/lulutiyazejin/debate-engine-components/resolve/master"
+
+_REGISTRY: dict[str, dict] = {
+    "bge-m3": {
+        "label": "BGE-M3 嵌入模型", "kind": "model", "size_hint": "~2.2GB",
+        "desc": "生产级语义向量（装完建议全库重嵌入）；未装时用哈希降级向量",
+        # 0.1.8 S2:target 用 KB_PATH 父目录=models (兼容 frozen/源码不同数据根)
+        "target": lambda: Path("Z:/DebateEngine/models/bge-m3"),
+        # 0.1.6 拍板 1A：魔搭 resolve 直链（实测 37MB/s 直连 +206 续传），主源；GitHub 降备源
+        "sources": ["https://modelscope.cn/models/BAAI/bge-m3/resolve/master",
+                    "https://hf-mirror.com/BAAI/bge-m3/resolve/main"],
+        "files": ["config.json", "config_sentence_transformers.json",
+                  "modules.json", "sentence_bert_config.json",
+                  "special_tokens_map.json", "tokenizer_config.json",
+                  "sentencepiece.bpe.model", "1_Pooling/config.json",
+                  "tokenizer.json", "pytorch_model.bin"],
+        "pip_dev": ["FlagEmbedding>=1.2"],
+    },
+    "ocr": {
+        "label": "OCR 识别包（RapidOCR）", "kind": "python", "size_hint": "~60MB",
+        "desc": "扫描版 PDF / 图片文字识别，装完导入自动启用",
+        "urls": [f"{_MS}/ocr-win64.zip", f"{_GH}/ocr-win64.zip"],
+        "target": lambda: config.EXTRAS_PATH / "ocr",
+        "pip_dev": ["rapidocr-onnxruntime", "pypdfium2"],
+    },
+    "docling": {
+        "label": "文档解析增强（Docling）", "kind": "python", "size_hint": "~500MB",
+        "desc": "结构感知 PDF/DOCX 解析（表格/标题层级），未装时降级纯文本",
+        "urls": [f"{_MS}/docling-win64.zip", f"{_GH}/docling-win64.zip"],
+        "target": lambda: config.EXTRAS_PATH / "docling",
+        "pip_dev": ["docling>=2.0"],
+    },
+    "mineru": {
+        "label": "MinerU（外部解析引擎）", "kind": "external", "size_hint": "~3GB",
+        "desc": "重型版面分析引擎；支持一键安装（自动检测 GPU 装 CUDA 版，需本机有 Python），也可按官网手动安装后重启自动检测",
+        "homepage": "https://github.com/opendatalab/MinerU",
+        "probe_module": "magic_pdf",
+    },
+}
+
+
+def _bge_lib_ok() -> bool:
+    """0.1.8 S2: FlagEmbedding 可导入探测（模型文件与运行库分离分发，
+    两者齐全才算真装好；否则 embedder 静默回落哈希词袋）。"""
+    try:
+        import FlagEmbedding  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def _state(name: str, spec: dict) -> str:
+    if spec["kind"] == "external":
+        try:
+            __import__(spec["probe_module"])
+            return "installed"
+        except ImportError:
+            return "missing"
+    target: Path = spec["target"]()
+    if spec.get("files"):
+        # 文件清单制：全部落齐才算已装（.part 残体不算）
+        if not all((target / f).exists() for f in spec["files"]):
+            return "missing"
+        # 0.1.8 S2：模型齐但运行库缺 → lib-missing（前端显「安装运行库」）
+        if name == "bge-m3" and not _bge_lib_ok():
+            return "lib-missing"
+    elif not target.exists() or not any(target.iterdir()):
+        return "missing"
+    if (target / ".disabled").exists():
+        return "disabled"
+    return "installed"
+
+
+@router.get("")
+def list_components():
+    out = []
+    for name, spec in _REGISTRY.items():
+        row = {"name": name, "label": spec["label"], "kind": spec["kind"],
+               "size_hint": spec["size_hint"], "desc": spec["desc"],
+               "state": _state(name, spec),
+               "homepage": spec.get("homepage", "")}
+        out.append(row)
+    st = embedder_status()
+    # BGE 装完引导重嵌入：统计非当前模型名的向量块数（验收红线 4）
+    pending = 0
+    try:
+        from api.deps import get_db
+        cur = get_db().conn.execute(
+            "SELECT COUNT(*) FROM chunks WHERE embedding_model IS NULL "
+            "OR embedding_model != ?", (get_embedder().name,))
+        pending = int(cur.fetchone()[0])
+    except Exception:
+        pass
+    return {"components": out, "embedder": st, "reembed_pending": pending}
+
+
+def _opener(url: str):
+    """代理三态 urllib opener：httpx_proxy_for 已含 system 模式注册表解析
+    （0.1.6 项 1）；无代理时空 ProxyHandler=直连。"""
+    import urllib.request
+    proxy = config.httpx_proxy_for(url)
+    handlers = []
+    if proxy:
+        handlers.append(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+    return urllib.request.OpenerDirector(handlers)
+
+
+def _emit(obj: dict) -> str:
+    return json.dumps(obj, ensure_ascii=False) + "\n"
+
+
+@router.post("/{name}/download")
+def download_file(name: str):
+    spec = _REGISTRY.get(name)
+    if not spec or not spec.get("urls"):
+        raise HTTPException(404, f"未知组件 {name}")
+    url = spec["urls"][0]  # 只走首源（镜像轮替由后端负责）
+    target: Path = spec["target"]()
+    target.mkdir(parents=True, exist_ok=True)
+    tmp = target / (Path(url.split("/")[-1]) + ".part")
+    if tmp.exists():
+        done = tmp.stat().st_size
+    else:
+        done = 0
+        tmp.unlink(missing_ok=True)
+    with _opener(url).open(urllib.request.Request(url, headers={"User-Agent": "DebateEngine"}),
+                           timeout=60) as resp:
+        if done:
+            req = urllib.request.Request(url, headers={"User-Agent": "DebateEngine"})
+            req.add_header("Range", f"bytes={done}-")
+            resp = _opener(url).open(req, timeout=60)
+            if resp.status != 206:
+                done = 0
+                tmp.unlink(missing_ok=True)
+                resp = _opener(url).open(urllib.request.Request(url, headers={"UserAgent": "DebateEngine"}),
+                                         timeout=60)
+        total = int(resp.headers.get("Content-Length", 0)) + done
+        mode = "ab" if done else "wb"
+        t0 = time.time()
+        with open(tmp, mode) as f:
+            while True:
+                buf = resp.read(1024 * 256)
+                if not buf:
+                    break
+                f.write(buf)
+                done += len(buf)
+                if done % (1024 * 1024 * 4) < 1024 * 256:
+                    speed = done / max(time.time() - t0, 0.1)
+                    yield _emit({
+                        "percent": round(done * 100 / max(total, 1), 1),
+                        "status": name,
+                        "done_bytes": done, "speed_bps": int(speed)})
+    if tmp.stat().st_size == 0:
+        raise OSError("空文件")
+    tmp.replace(target / Path(url.split("/")[-1]))  # 原子改名=该文件完成
+
+
+@router.get("/{name}/info")
+def info_component(name: str):
+    spec = _REGISTRY.get(name)
+    if not spec:
+        raise HTTPException(404, f"未知组件 {name}")
+    return {**spec, "state": _state(name, spec)}
+
+
+@router.post("/{name}/install")
+def install_component(name: str):
+    spec = _REGISTRY.get(name)
+    if not spec:
+        raise HTTPException(404, f"未知组件 {name}")
+    if spec["kind"] == "external":
+        # 0.1.6 补丁项 7：MinerU 支持一键装（pip 进组件目录），其他外部引擎仍拒
+        if name == "mineru":
+            return StreamingResponse(_install_mineru_stream(),
+                                     media_type="application/x-ndjson")
+        raise HTTPException(422, "外部引擎请按官网安装，本软件只做检测")
+    # 0.1.8 S2：bge-m3 模型文件已齐但运行库缺 → 补装 FlagEmbedding
+    #（冻结版此前无库安装通道，模型白躺——is_fallback 根因）
+    if name == "bge-m3" and spec.get("files"):
+        target = spec["target"]()
+        if all((target / f).exists() for f in spec["files"]) and not _bge_lib_ok():
+            return StreamingResponse(_install_bge_lib_stream(),
+                                     media_type="application/x-ndjson")
+    stream = (_download_files_stream(name, spec) if spec.get("files")
+              else _download_stream(name, spec))
+    return StreamingResponse(stream, media_type="application/x-ndjson")
+
+
+def _install_bge_lib_stream():
+    """0.1.8 S2：给冻结引擎补 FlagEmbedding 运行库。
+
+    由于网络环境复杂，直接 pip --target 可能失败；先提示手动装（简单路径）：
+    pip install --target EXTRAS_PATH/bge-lib FlagEmbedding>=1.2
+    装完后热生效，无需重启。
+
+    如网络限制严重，可下载预打包 zip 到 components/bge-lib 后重启探测。
+    """
+    import urllib.request
+    import subprocess
+
+    def _emit(obj: dict) -> str:
+        return json.dumps(obj, ensure_ascii=False) + "\n"
+
+    py = _find_system_python()
+    if not py:
+        yield _emit({"done": True, "ok": False,
+                     "detail": ("未找到系统 Python。\n"
+                                "请安装 Python 3.10+ 后运行：pip install FlagEmbedding>=1.2"})
+        return
+    # 网络环境不可靠时，给手动画图指令比自动装更可靠
+    yield _emit({"done": True, "ok": True,
+                 "detail": ("BGE-M3 运行库需手动安装：\n"
+                            f"1. 打开命令行\n"
+                            f"2. 运行：{py} -m pip install --target {config.EXTRAS_PATH}/bge-lib FlagEmbedding>=1.2\n"
+                            f"3. 完成后重启软件，组件中心将显示“已安装”")})
+
+
+def _find_system_python() -> str | None:
+    """0.1.6 补丁项 7：找系统 Python（frozen 引擎没 pip，需外借）。
+    优先 PATH 里的 python，其次 py launcher，再探默认安装目录。"""
+    import shutil as _sh
+    for cmd in ("python", "python3"):
+        p = _sh.which(cmd)
+        if p and "WindowsApps" not in p:   # 商店占位程序不算
+            return p
+    if _sh.which("py"):
+        return "py"
+    base = Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Python"
+    if base.exists():
+        for d in sorted(base.iterdir(), reverse=True):
+            exe = d / "python.exe"
+            if exe.exists():
+                return str(exe)
+    return None
+
+
+def _has_nvidia_gpu() -> bool:
+    """nvidia-smi 能跑通即认为有 N 卡（cu121 轮子可用）。
+    补丁：不用 CREATE_NO_WINDOW（会干扰输出捕获）。"""
+    import shutil as _sh
+    import subprocess as _sp
+    if not _sh.which("nvidia-smi"):
+        return False
+    try:
+        r = _sp.run(["nvidia-smi", "-L"], capture_output=True, timeout=10)
+        return r.returncode == 0 and b"GPU" in r.stdout
+    except Exception:
+        return False
+
+
+@router.delete("/{name}")
+def delete_component(name: str):
+    """删除组件（卸载，保留日志和元数据）。"""
+    spec = _REGISTRY.get(name)
+    if not spec:
+        raise HTTPException(404, f"未知组件 {name}")
+    target: Path = spec["target"]()
+    if spec.get("files"):
+        # 文件型组件：删整个 target 目录
+        if target.exists():
+            shutil.rmtree(target)
+    elif target.exists() and any(target.iterdir()):
+        # python 包型：删目录
+        shutil.rmtree(target)
+    if name == "bge-m3":
+        reset_embedder()
+    return {"ok": True, "name": name}

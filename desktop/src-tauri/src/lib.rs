@@ -18,7 +18,7 @@ struct Engine {
 }
 
 /// 引擎命令与工作目录：开发态用 venv Python 跑 cli.py serve；
-/// 发布态用安装目录 engine/DebateEngine.exe serve（KB 固定在安装目录）。
+/// 发布态直接用 PyInstaller 打包的 DebateEngine.exe 启动。
 fn engine_launch() -> (PathBuf, Vec<String>, PathBuf, PathBuf) {
     if cfg!(debug_assertions) {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -38,6 +38,7 @@ fn engine_launch() -> (PathBuf, Vec<String>, PathBuf, PathBuf) {
             .expect("exe dir")
             .to_path_buf();
         let engine_dir = exe_dir.join("engine");
+        // 发布态：直接使用 PyInstaller 打包的 DebateEngine.exe（已经包含所有依赖）
         (
             engine_dir.join("DebateEngine.exe"),
             vec!["serve".into()],

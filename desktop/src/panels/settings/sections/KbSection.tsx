@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "../../../api";
 import { askConfirm } from "../../../components/AppDialog";
+import SegmentedSlider from "../../../components/SegmentedSlider";
 import DataDirSection from "../DataDirSection";
 
 interface Props {
@@ -12,9 +13,9 @@ interface Props {
 }
 
 const ARCHIVE_POLICIES = [
-  { k: "ask", label: "每次问（确认屏三选）" },
-  { k: "copy", label: "复制进档案库" },
-  { k: "move", label: "迁移进档案库" },
+  { k: "ask", label: "每次问" },
+  { k: "copy", label: "复制进档" },
+  { k: "move", label: "迁移进档" },
   { k: "none", label: "不归档" },
 ];
 
@@ -92,12 +93,8 @@ export default function KbSection({ notify, tick }: Props) {
       <h3>原件归档策略</h3>
       <p className="muted small">导入确认时原件如何进档案库（archive 目录，人可读 md+原件）；与确认屏「记住选择」同源。</p>
       <div className="controls">
-        {ARCHIVE_POLICIES.map((p) => (
-          <label key={p.k} className="chk">
-            <input type="radio" checked={policy === p.k}
-                   onChange={() => savePolicy(p.k)} /> {p.label}
-          </label>
-        ))}
+        <SegmentedSlider value={policy} onChange={savePolicy}
+          options={ARCHIVE_POLICIES.map((p) => ({ key: p.k, label: p.label }))} />
       </div>
       <DataDirSection notify={notify} />
     </>

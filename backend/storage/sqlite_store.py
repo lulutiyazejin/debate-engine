@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import jieba
@@ -42,9 +43,11 @@ CREATE TABLE IF NOT EXISTS documents (
     school       TEXT,
     year_raw     TEXT,
     manual_fields TEXT,
+    review_status TEXT DEFAULT 'approved',
     created_at   TEXT,
     updated_at   TEXT,
-    deleted_at   TEXT
+    deleted_at   TEXT,
+    relations_at TEXT  /* 0.1.9 E1：关系边配对记账时间戳 */
 );
 CREATE TABLE IF NOT EXISTS chapters (
     chapter_id  TEXT PRIMARY KEY,
@@ -121,6 +124,16 @@ CREATE TABLE IF NOT EXISTS responses (
     starred        INTEGER DEFAULT 0,
     created_at     TEXT
 );
+CREATE TABLE IF NOT EXISTS highlights (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    doc_id      TEXT NOT NULL,           -- 0.1.8 N3：阅读器高亮批注
+    quote       TEXT NOT NULL,           -- 高亮引文（文本锚点主体）
+    prefix      TEXT DEFAULT '',         -- 前文 32 字符（重定位容错）
+    suffix      TEXT DEFAULT '',         -- 后文 32 字符
+    color       TEXT DEFAULT 'yellow',
+    note        TEXT DEFAULT '',
+    created_at  TEXT
+);
 """
 
 # 覆盖索引单独执行：必须在列迁移之后建（旧库先补列再建索引，
@@ -165,6 +178,10 @@ _MIGRATIONS: list[tuple[str, str, str]] = [
     ("documents", "manual_fields", "TEXT"),
     # 0.1.5 I2：日期原文回显（year 存整数年接筛选，year_raw 存原文）
     ("documents", "year_raw", "TEXT"),
+    # 0.1.8 M2：批量导入待审队列（旧库存量默认 approved）
+    ("documents", "review_status", "TEXT DEFAULT 'approved'"),
+    # 0.1.9 E1: 关系边增量更新记账
+    ("documents", "relations_at", "TEXT"),
 ]
 
 
@@ -187,6 +204,7 @@ class SqliteStore(WorkspaceMixin, MetadataStoreBase):
         self._migrate()
         self.conn.executescript(_INDEXES)
         self.conn.commit()
+        self._migrate_years()   # 0.1.9 D1：存量年份重解析（幂等）
         # 0.1.4 批 4：公共素材组常在；旧库存量素材（group_id 空）归公共组
         pub = self._ensure_public_group()
         self.conn.execute(
@@ -201,6 +219,41 @@ class SqliteStore(WorkspaceMixin, MetadataStoreBase):
             if column not in cols:
                 self.conn.execute(
                     f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+
+    def _migrate_years(self) -> None:
+        """0.1.9 D1：一次性存量年份迁移。year 超范围(-3000..2600)的文档，
+        从 year_raw / 原值重解析（如 20260501120137 → 2026）；manual_fields 含 year
+        的跳过（手动最高优先）；无法解析置 NULL。幂等：修好后不再触碰。"""
+        from lib.years import sane_year
+        try:
+            rows = self.conn.execute(
+                "SELECT doc_id, year, year_raw, manual_fields FROM documents "
+                "WHERE year IS NOT NULL AND (year < -3000 OR year > 2600)").fetchall()
+        except sqlite3.OperationalError:
+            return   # 列尚未就绪（极早期库），下次启动再跑
+        for r in rows:
+            try:
+                manual = json.loads(r["manual_fields"]) if r["manual_fields"] else []
+            except Exception:
+                manual = []
+            if "year" in manual:
+                continue
+            yi, yr = None, None
+            for cand in (r["year_raw"], str(r["year"])):
+                if not cand:
+                    continue
+                yi, yr = sane_year(cand)
+                if yi is not None:
+                    break
+            if yi is not None:
+                self.conn.execute(
+                    "UPDATE documents SET year=?, year_raw=? WHERE doc_id=?",
+                    (yi, yr, r["doc_id"]))
+            else:
+                self.conn.execute(
+                    "UPDATE documents SET year=NULL WHERE doc_id=?", (r["doc_id"],))
+        if rows:
+            self.conn.commit()
 
     def close(self) -> None:
         self.conn.close()
@@ -287,6 +340,83 @@ class SqliteStore(WorkspaceMixin, MetadataStoreBase):
             rows = self.conn.execute(
                 base + " ORDER BY import_date DESC").fetchall()
         return [dict(r) for r in rows]
+
+    # ---------- 0.1.8 M2：待审队列 ----------
+    def pending_doc_ids(self) -> set[str]:
+        """待审文档 id 集：检索/图谱/脉络/素材来源查询统一过滤用。"""
+        rows = self.conn.execute(
+            "SELECT doc_id FROM documents "
+            "WHERE review_status='pending' AND deleted_at IS NULL").fetchall()
+        return {r["doc_id"] for r in rows}
+
+    def set_review_status(self, doc_id: str, status: str) -> bool:
+        cur = self.conn.execute(
+            "UPDATE documents SET review_status=?, updated_at=datetime('now') "
+            "WHERE doc_id=? AND deleted_at IS NULL", (status, doc_id))
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    # ---------- 0.1.9 E1: 关系边记账（relations_at）管理 ----------
+    def mark_relations_built(self, doc_ids: list[str] | None = None) -> bool:
+        """配对完成时打标：给定文档集或全库打上当前时间戳。"""
+        now = datetime.now().isoformat()
+        if doc_ids:
+            ids_placeholder = ",".join("?" * len(doc_ids))
+            cur = self.conn.execute(
+                f"UPDATE documents SET relations_at=? WHERE doc_id IN ({ids_placeholder}) AND deleted_at IS NULL",
+                [now] + doc_ids)
+        else:
+            cur = self.conn.execute(
+                "UPDATE documents SET relations_at=? WHERE deleted_at IS NULL", (now,))
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def count_relations_pending(self) -> int:
+        """统计 relations_at IS NULL 的文档数（未配对过或重提取后待更新）。"""
+        row = self.conn.execute(
+            "SELECT COUNT(*) as n FROM documents WHERE relations_at IS NULL AND deleted_at IS NULL").fetchone()
+        return row["n"] if row else 0
+
+    def clear_relations_at(self, doc_ids: list[str]) -> bool:
+        """重提取时清空指定文档的关系边记账，以便增量重建时使用。"""
+        if not doc_ids:
+            return True
+        ids_placeholder = ",".join("?" * len(doc_ids))
+        cur = self.conn.execute(
+            f"UPDATE documents SET relations_at=NULL WHERE doc_id IN ({ids_placeholder}) AND deleted_at IS NULL",
+            doc_ids)
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def approve_all(self) -> int:
+        cur = self.conn.execute(
+            "UPDATE documents SET review_status='approved', "
+            "updated_at=datetime('now') "
+            "WHERE review_status='pending' AND deleted_at IS NULL")
+        self.conn.commit()
+        return cur.rowcount
+
+    # ---------- 0.1.8 N3：阅读器高亮批注 ----------
+    def highlight_add(self, doc_id: str, quote: str, prefix: str = "",
+                      suffix: str = "", color: str = "yellow",
+                      note: str = "") -> int:
+        cur = self.conn.execute(
+            "INSERT INTO highlights (doc_id,quote,prefix,suffix,color,note,"
+            "created_at) VALUES (?,?,?,?,?,?,datetime('now'))",
+            (doc_id, quote, prefix, suffix, color, note))
+        self.conn.commit()
+        return int(cur.lastrowid or 0)
+
+    def highlight_list(self, doc_id: str) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM highlights WHERE doc_id=? ORDER BY id",
+            (doc_id,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def highlight_delete(self, hl_id: int) -> int:
+        cur = self.conn.execute("DELETE FROM highlights WHERE id=?", (hl_id,))
+        self.conn.commit()
+        return cur.rowcount
 
     def find_by_hash(self, content_hash: str) -> dict | None:
         """内容哈希查重（项目2 消费）。"""
@@ -432,9 +562,37 @@ class SqliteStore(WorkspaceMixin, MetadataStoreBase):
     # ---------- 级联删除（软删默认，硬删供清理/迁移） ----------
     def delete_document(self, doc_id: str, hard: bool = False) -> dict:
         """软删：documents 标记 deleted_at + 移除 FTS 行（检索即刻干净，
-        元数据可恢复）；硬删：五表级联物理删除。LanceDB 删除由调用方负责。"""
+        元数据可恢复）；硬删：五表级联物理删除。LanceDB 删除由调用方负责。
+        0.1.8 M5 级联补全：basket 标注「来源已删」、跨文档关系边清 NULL、
+        highlights 随文档删；responses 不动（历史卡前端兜底显「来源已删」）。"""
         c = self.conn
         counts: dict = {}
+        # M5：被删文档名下的引用 id 集（doc_id/chunk_id/arg_id）先收集
+        ref_ids = [doc_id]
+        ref_ids += [r["chunk_id"] for r in c.execute(
+            "SELECT chunk_id FROM chunks WHERE doc_id=?", (doc_id,))]
+        arg_ids = [r["arg_id"] for r in c.execute(
+            "SELECT arg_id FROM arg_units WHERE doc_id=?", (doc_id,))]
+        ref_ids += arg_ids
+        # basket：保留摘录可用，来源名追加标注（只标一次）
+        if ref_ids:
+            ph = ",".join("?" * len(ref_ids))
+            cur = c.execute(
+                f"UPDATE basket SET source = source || '（来源已删）' "
+                f"WHERE ref_id IN ({ph}) AND source NOT LIKE '%（来源已删）'",
+                ref_ids)
+            counts["basket_marked"] = cur.rowcount
+        # 跨文档关系边：指向被删单元的 relation/target 清 NULL（防幽灵边）
+        if arg_ids:
+            ph = ",".join("?" * len(arg_ids))
+            cur = c.execute(
+                f"UPDATE arg_units SET relation=NULL, target_unit_id=NULL "
+                f"WHERE target_unit_id IN ({ph}) AND doc_id != ?",
+                (*arg_ids, doc_id))
+            counts["edges_cleared"] = cur.rowcount
+        # highlights 随文档删（N3）
+        cur = c.execute("DELETE FROM highlights WHERE doc_id=?", (doc_id,))
+        counts["highlights"] = cur.rowcount
         if hard:
             # 子表先删再删主表：避免新库外键 CASCADE 抢先清除导致计数失真
             for table in ("chapters", "chunks", "arg_units",

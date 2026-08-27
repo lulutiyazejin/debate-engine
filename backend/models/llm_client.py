@@ -100,7 +100,7 @@ class Provider:
                          "rate_limited", t.ms)
             raise LLMError("rate_limit", f"{self.name} 429")
         if r.status_code in (400, 451, 422):
-            body = r.text[:200]
+            body = r.content.decode("utf-8", "replace")[:200]
             log_api_call(trace_id, task, self.name, self.model,
                          "content_filtered", t.ms, error=body)
             raise LLMError("content_filter", f"{self.name} {r.status_code}: {body}")
@@ -110,10 +110,14 @@ class Provider:
             raise LLMError("auth", f"{self.name} auth failed")
         if r.status_code != 200:
             log_api_call(trace_id, task, self.name, self.model,
-                         f"http_{r.status_code}", t.ms, error=r.text[:200])
+                         f"http_{r.status_code}", t.ms,
+                         error=r.content.decode("utf-8", "replace")[:200])
             raise LLMError("other", f"{self.name} HTTP {r.status_code}")
 
-        data = r.json()
+        # 0.1.8 S1：bytes 直入 json.loads（RFC 8259 自动 UTF-8）。
+        # httpx r.json() 走 text 编码推断，响应头无 charset 时中文被猜成
+        # Latin-1 → 全文 mojibake（实测 deepseek 输出 CJK=0 的根因）。
+        data = json.loads(r.content)
         # 0.1.5 F2：ollama 原生响应格式（message.content + eval_count）
         if self.name == "ollama" and "message" in data:
             content = data["message"]["content"]

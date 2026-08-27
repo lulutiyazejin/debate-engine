@@ -350,3 +350,11 @@
 - LocalModelSection：OllamaStatus +installing；点击 toast「后台下载关页不中断」；useEffect 自动重连（installing 且无二进制且本地空闲才接，has_binary 拦住装完后误重装）。
 - 编译：SYNTAX OK；pytest 77 passed；tsc 0 错误。
 - 交付：重打包三件（tauri/PyInstaller/makensis 117.6MB）；Z: 静默重装 health 0.1.6；实测断点 720MB 起步续传、客户端 15s 被杀后台照跑（20s 再涨 11MB）、二次调用接入进行中任务；安装包上传 Release v0.1.6 资产 HTTP 201（browser_download_url 已可公开下载）；源码推送 c5a1e75。
+
+### 热修6 · 引擎启动即退（settings.py 语法错误）
+- 现象：装包后启动报「引擎进程已退出」；0.1.5 正常、0.1.6 必现。
+- 排查弯路（均已回滚）：一度误判为缺 .venv（NSIS 塞 .venv 至 143MB）、误改 lib.rs 发布态用 python.exe 包一层、误加 spec hiddenimports；真相是沙箱端口封锁判断也错了——后端一直在崩。
+- 根因：补丁项 1 提交时 api/settings.py ollama_status 的 cands.append 尾部多打一个右括号（`")}))`）→ SyntaxError → `from api import settings` 失败 → cli serve 即退；PyInstaller 报相同 ImportError 属同源。
+- 修复：settings.py L352 `")}))` → `")})`；lib.rs/installer.nsi 回滚至 0.1.5 原逻辑（仅注释差异）；spec 还原原始 hiddenimports。
+- 验证：py_compile 通过；源码 serve health 0.1.6；PyInstaller dist exe serve health 0.1.6；重打安装包 112.1MB 静默装 Z: 后双击壳启动，.engine_port 写入 7700+PID，health version=0.1.6；用户实机确认可进入。
+- 教训：改完 Python 必跑 py_compile/导入自检再打包；启动失败先捕 stderr 看真异常，不先猜环境。

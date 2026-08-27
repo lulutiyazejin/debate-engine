@@ -33,6 +33,16 @@
 - **导入扩面**：扫描版 PDF 走 RapidOCR 组件；政府站类 URL 抽 HTML 表格+附件递归导入+csv+GBK 回退。
 - **形态**：视觉四件收尾（OKLCH 主色系派生/细线减法/高度阶梯 40-32-24/滚动条 token 化），见 ARCH-UI-reference.md §0.11–0.16。
 
+### 0.1.7 能力扩展（详见 PLAN-0.1.7.md）
+> 0.1.5/0.1.6 见各自 PLAN（图谱五投影/立方自绘/魔搭直连/MinerU 一键等），不在此复述。
+- **坐标语义**：提取失败写 null 不写 0（区分「未提取」与「真中性」），low_confidence_axes 核心/扩展轴统一；馆藏加「重新提取坐标」后台 NDJSON 任务（清章节 summarized+__doc__ 双标记、arg_units 先删后插、provenance 读-改-写保留 source/classification 子键、完成清悬空边）。
+- **模型识别**：installed_base 剥路径取末段对齐 ms_name 末段匹配（魔搭源已装识别）；pull_stream 增传 done/total 字节供前端三件套进度。
+- **立场标签**：_display_title 剥括号注记（红队限定保留 skill 正文 Prompt 段）。
+- **立方相对坐标**：「中心立场」选择器（减中心均值+夹壁+悬停真值）；「距离虚线」开关默认关；默认放大。
+- **雷达维度**：显示层合并 22→17（五组语义重叠轴取均值：技术/AI、全球化/外交、经济正义、权力/组织、身份/性别），数据层 22 轴照存零迁移，可展开细轴。
+- **字体管理**：设置·字体分区（OFL 推荐字体多源下载/本地导入/应用删除热生效）；canvas 字体 token 化+fonts.ready 重绘。
+- **API 新增**：POST /api/fonts/download（NDJSON）/POST /api/fonts/upload/DELETE /api/fonts/{name}；坐标重提取端点（NDJSON 后台任务）。
+
 ### 与同类工具的差异
 | 对比维度 | 普通 AI 对话 | 本项目 |
 |----------|------------|--------|

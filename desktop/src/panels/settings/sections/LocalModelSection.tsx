@@ -2,10 +2,11 @@
 // H2 硬件探测推荐行 + F1 矩阵精选卡（荐/需升级徽标）+ 自由输入 pull +
 // F2 上下文档位（自动/手动五档+每档显存预估）+ F3b 一键启动/下载通道 +
 // F3c 本地 GGUF 导入。数据源=G2 模型矩阵（后端单一真源）。
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api, engineBase } from "../../../api";
 import { ndjsonPost } from "../../../lib/ndjson";
+import SegmentedSlider from "../../../components/SegmentedSlider";
 
 export interface Candidate {
   name: string; label: string; vram_gb: number; window: number;
@@ -39,6 +40,22 @@ interface Props {
 }
 
 const fmtK = (n: number) => (n >= 1024 ? `${Math.round(n / 1024)}k` : `${n}`);
+const fmtGB = (b: number) => (b / 1073741824).toFixed(1);
+
+// 0.1.7 项 12：魔搭源模型名带完整路径（modelscope.cn/…），显示取末段+标注来源
+const displayModel = (m: string) =>
+  m.includes("/") ? `${m.split("/").pop()}·魔搭源` : m;
+
+// 0.1.7 项 8：通栏进度行（模型卡/其他模型/运行时安装共用）；
+// Ollama 原始 status（哈希层名等）只留 title 悬停
+function PullBar({ pct, text, title }: { pct: number; text: string; title?: string }) {
+  return (
+    <div className="pull-bar" title={title}>
+      <div className="track"><i style={{ width: `${pct}%` }} /></div>
+      <em>{text}</em>
+    </div>
+  );
+}
 
 export default function LocalModelSection({ notify, onChanged, tick }: Props) {
   const [ollama, setOllama] = useState<OllamaStatus | null>(null);
@@ -47,6 +64,10 @@ export default function LocalModelSection({ notify, onChanged, tick }: Props) {
   const [pulling, setPulling] = useState("");
   const [pullPct, setPullPct] = useState(0);
   const [pullMsg, setPullMsg] = useState("");
+  // 0.1.7 项 8：字节进度（后端 pull_stream 传 total/completed）+ 时间窗算速度
+  const [pullBytes, setPullBytes] = useState({ done: 0, total: 0 });
+  const [pullSpeed, setPullSpeed] = useState(0);   // MB/s
+  const speedRef = useRef({ t: 0, bytes: 0 });
   // 0.1.6 hotfix：runtime 一键装（官方包+代理三态）
   const [installing, setInstalling] = useState("");
   const [instPct, setInstPct] = useState(0);
@@ -75,6 +96,8 @@ export default function LocalModelSection({ notify, onChanged, tick }: Props) {
     }
     const key = displayKey || name;
     setPulling(key); setPullPct(0); setPullMsg("连接中…");
+    setPullBytes({ done: 0, total: 0 }); setPullSpeed(0);
+    speedRef.current = { t: 0, bytes: 0 };
     notify(name.startsWith("modelscope.cn/")
       ? `开始从魔搭国内源拉取 ${key}（直连高速，不走代理）`
       : `开始从 Ollama 官方源拉取 ${key}（下载通道见「运行状态」行）`);
@@ -103,6 +126,17 @@ export default function LocalModelSection({ notify, onChanged, tick }: Props) {
           } else {
             if (typeof evt.percent === "number") setPullPct(evt.percent);
             if (evt.status) setPullMsg(evt.status);
+            // 项 8：字节进度 + 速度（≥1s 窗口算 delta；completed 回退=换层，重置窗口）
+            if (typeof evt.completed === "number" && typeof evt.total === "number" && evt.total > 0) {
+              setPullBytes({ done: evt.completed, total: evt.total });
+              const s = speedRef.current, now = Date.now();
+              if (!s.t || evt.completed < s.bytes) {
+                speedRef.current = { t: now, bytes: evt.completed };
+              } else if (now - s.t >= 1000) {
+                setPullSpeed((evt.completed - s.bytes) / ((now - s.t) / 1000) / 1048576);
+                speedRef.current = { t: now, bytes: evt.completed };
+              }
+            }
           }
         }
       }
@@ -199,6 +233,12 @@ export default function LocalModelSection({ notify, onChanged, tick }: Props) {
   // 补丁项 1：精选卡优先用魔搭源（ms_name），自由输入仍原样传
   const pullName = (c: Candidate) => c.ms_name || c.name;
 
+  // 项 8：通栏进度文字三要素：「45% · 9.2/20.4GB · 37MB/s」
+  const pullLine = () =>
+    `${pullPct}%` +
+    (pullBytes.total ? ` · ${fmtGB(pullBytes.done)}/${fmtGB(pullBytes.total)}GB` : "") +
+    (pullSpeed > 0 ? ` · ${pullSpeed >= 10 ? Math.round(pullSpeed) : pullSpeed.toFixed(1)}MB/s` : "");
+
   return (
     <>
       <h3>本地模型（Ollama）</h3>
@@ -226,25 +266,23 @@ export default function LocalModelSection({ notify, onChanged, tick }: Props) {
           <span>
             <span className={"badge " + (ollama.running ? "ok" : "warn")}>
               {ollama.running ? `运行中${ollama.version ? ` v${ollama.version}` : ""}` : "未运行"}</span>
-            {!ollama.running && (
+            {!ollama.running && installing !== "downloading" && (
               <>
-                {installing === "downloading" ? (
-                  <span style={{ marginLeft: 8, display: "inline-flex", alignItems: "center" }}>
-                    <button className="link">{instMsg || "下载中…"}</button>
-                    <i style={{ width: `${instPct}%`, minWidth: "60px" }} />
-                  </span>
-                ) : (!ollama.has_binary ? (
+                {!ollama.has_binary ? (
                   <>
                     <button style={{ marginLeft: 8 }} className="primary" onClick={installRuntime}>一键安装（官方包·代理）</button>
                     <button style={{ marginLeft: 8 }} disabled={serving} onClick={serve}>一键启动</button>
                   </>
-                ) : null)}
-                {ollama.has_binary && (
+                ) : (
                   <button style={{ marginLeft: 8 }} disabled={serving || installing !== ""} onClick={serve}>
                     {serving ? "启动中…" : "一键启动"}</button>)}
               </>
             )}
           </span></div>
+        {/* 项 8：runtime 安装进度同样通栏化，文案维持后端「源 xx/xxMB」 */}
+        {installing === "downloading" && (
+          <PullBar pct={instPct} text={`${instPct}% · ${instMsg || "连接中…"}`}
+                   title="Ollama 运行时后台安装中，关闭页面不中断" />)}
         {!ollama.running && <p className="muted small">{ollama.hint}（「一键启动」会按代理设置注入下载通道，无弹窗）</p>}
         {ollama.channel && (
           <div className="param-row"><span>下载通道</span>
@@ -256,7 +294,8 @@ export default function LocalModelSection({ notify, onChanged, tick }: Props) {
           <div className="param-row"><span>当前生效模型</span><code>{ollama.active_model}</code></div>)}
         {ollama.installed_models.length > 0 && (
           <div className="param-row"><span>已安装</span>
-            <span className="muted small">{ollama.installed_models.join("、")}</span></div>)}
+            <span className="muted small">
+              {ollama.installed_models.map(displayModel).join("、")}</span></div>)}
 
         <h3>精选模型</h3>
         <p className="muted small">下载完成立即设为本地默认模型并热生效（任务落点随即可见），无需重启。</p>
@@ -269,10 +308,7 @@ export default function LocalModelSection({ notify, onChanged, tick }: Props) {
                   title={`需 Ollama ≥ ${c.min_runtime}`}>需升级 Ollama 才能跑</span>}
               </span>
               {pulling === c.name ? (
-                <span className="pull-progress" title={pullMsg}>
-                  <i style={{ width: `${pullPct}%` }} />
-                  <em>{pullPct}% {pullMsg}</em>
-                </span>
+                <button disabled>下载中…</button>
               ) : (
                 <button disabled={!!pulling}
                         onClick={() => (c.compat_ok ? pullModel(pullName(c), c.name)
@@ -284,6 +320,9 @@ export default function LocalModelSection({ notify, onChanged, tick }: Props) {
               显存(Q4) {c.vram_gb}GB · 窗 {fmtK(c.window)} · 速度{c.speed} ·
               质量{c.quality} · {c.zh} · {c.good_at}
             </div>
+            {/* 项 8：进度改卡内独立通栏行（元信息下方） */}
+            {pulling === c.name && (
+              <PullBar pct={pullPct} text={pullLine()} title={pullMsg} />)}
           </div>
         ))}
         <div className="param-row"><span>其他模型</span>
@@ -293,6 +332,9 @@ export default function LocalModelSection({ notify, onChanged, tick }: Props) {
             <button disabled={!!pulling || !freeName.trim()}
                     onClick={() => pullModel(freeName.trim())}>下载并启用</button>
           </span></div>
+        {/* 项 8：自由输入 pull 同样吃到通栏进度（key 不在精选卡内→画在这） */}
+        {!!pulling && !ollama.candidates.some((c) => c.name === pulling) && (
+          <PullBar pct={pullPct} text={pullLine()} title={pullMsg} />)}
 
         {/* F2 上下文档位 */}
         {ctx && (
@@ -303,34 +345,29 @@ export default function LocalModelSection({ notify, onChanged, tick }: Props) {
               {fmtK(ctx.auto_value)}；手动档换挡热生效。显存预估=权重(Q4)+KV×档长+2GB。
             </p>
             <div className="param-row"><span>档位</span>
-              <span className="controls">
-                <label className="chk">
-                  <input type="radio" checked={ctx.mode === "auto"}
-                         onChange={() => patchCtx("auto")} />
-                  自动（{fmtK(ctx.auto_value)}）
-                </label>
-                <label className="chk">
-                  <input type="radio" checked={ctx.mode === "manual"}
-                         onChange={() => patchCtx("manual", ctx.value || ctx.auto_value)} />
-                  手动
-                </label>
+              <span className="controls" style={{display: 'inline-flex', gap: '6px'}}>
+                <SegmentedSlider value={ctx.mode}
+                  onChange={(m) => m === "auto"
+                    ? patchCtx("auto")
+                    : patchCtx("manual", ctx.value || ctx.auto_value)}
+                  options={[{ key: "auto", label: "自动", title: "自动档按模型推荐" },
+                            { key: "manual", label: "手动", title: "换挡即生效" }]} />
               </span></div>
             {ctx.mode === "manual" && (
               <div className="param-row"><span>手动档</span>
-                <span className="controls ctx-gears">
+                <span className="controls ctx-gears" style={{gap: '16px'}}>
                   {ctx.gears.map((g) => (
                     <button key={g.ctx}
                             className={ctx.value === g.ctx ? "gear-on" : ""}
                             title={`预估显存 ${g.vram_gb}GB${g.tight ? "（超本机显存）" : ""}`}
-                            onClick={() => patchCtx("manual", g.ctx)}>
-                      {fmtK(g.ctx)}
+                            onClick={() => patchCtx("manual", g.ctx)}
+                            style={{minWidth: '90px', textAlign: 'center', display: 'flex', flexDirection: 'column', justifyContent: 'center'}}>
+                      <strong>{fmtK(g.ctx)}</strong>
                       <em>{g.vram_gb}GB{g.tight ? " ⚠" : ""}</em>
                     </button>
                   ))}
-                </span></div>)}
-            {ctx.mode === "manual" &&
-              ctx.gears.find((g) => g.ctx === ctx.value)?.tight && (
-              <p className="muted small">⚠ 该档预估显存超过本机显存，可能回落 CPU 变慢（不禁止）。</p>)}
+                </span></div>
+            )}
           </>
         )}
 

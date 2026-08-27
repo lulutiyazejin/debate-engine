@@ -5,6 +5,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { api } from "../api";
 import { parseDateInput } from "../lib/dates";
+import { stanceLabel as _stanceLabel } from "../lib/stance";
 
 interface Props {
   stances: { name: string; label?: string }[];
@@ -27,6 +28,7 @@ interface Preview {
   long_chapters?: number;   // 0.1.5 F5：将拆多趟提取的长章数
   attachments?: string[];   // 0.1.5 A5：页内附件（xls/pdf 链接）
   web_enrich?: { fields: Record<string, string>; source: string; reports: string[] };
+  coordinates?: { extraction?: string };   // 0.1.7 项 2：offline=坐标无效提取
 }
 
 // 0.1.5 F5：摘要落点窗口（判墙数据源 /api/config/summary-window）
@@ -43,6 +45,8 @@ export default function ImportPanel({ stances, notify, onDone, active = true }: 
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState("");
   const [preview, setPreview] = useState<Preview | null>(null);
+  // 0.1.9 L2：确认弹窗 Esc/遮罩暂收态（保留已解析结果）
+  const [confirmHidden, setConfirmHidden] = useState(false);
   const [meta, setMeta] = useState<Record<string, string>>({});
   const [chosenStance, setChosenStance] = useState("");
   const [onDup, setOnDup] = useState("keep-both");
@@ -76,6 +80,14 @@ export default function ImportPanel({ stances, notify, onDone, active = true }: 
 
   useEffect(() => () => window.clearTimeout(pollRef.current), []);
 
+  // 0.1.9 L2：Esc 暂收确认弹窗（保留已解析结果，左栏「继续确认」可重开）
+  useEffect(() => {
+    if (!preview || confirmHidden) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setConfirmHidden(true); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [preview, confirmHidden]);
+
   // 0.1.5 I1：离面时停轮询（防后台空轮询），回面且批量进行中则续上
   useEffect(() => {
     activeRef.current = active;
@@ -94,6 +106,11 @@ export default function ImportPanel({ stances, notify, onDone, active = true }: 
       } else {
         setBusy("");
         onDone();
+        // 0.1.9 L3：批量完成点名——入库/失败数 + 坐标可能未提取的重提取指引
+        const suc = p.items.filter((it) => it.status === "success").length;
+        const fail = p.items.filter((it) => it.status === "failed").length;
+        if (p.items.length)
+          notify(`批量导入完成：入库 ${suc} 本${fail ? `，失败 ${fail} 本` : ""}；坐标若未提取（模型未运行）可在馆藏工具条「待提取坐标」角标重提取`);
       }
     } catch {
       if (activeRef.current)
@@ -119,7 +136,11 @@ export default function ImportPanel({ stances, notify, onDone, active = true }: 
         { source, summary_strategy: strategy });
       if (runId.current !== id) return;   // 已取消：丢弃本次结果
       setPreview(pv);
+      setConfirmHidden(false);   // 0.1.9 L2：新解析结果到 → 重开确认弹窗
       setChosenStance(pv.classification?.stance || stances[0]?.name || "");
+      // 0.1.7 项 2：坐标提取落了离线模板兜底 → 显式告知而非静默全 0
+      if (pv.coordinates?.extraction === "offline")
+        notify("坐标跳过（本地模型未运行），可稍后重提取");
       // F5：取摘要落点窗口判墙（切槽后重导即按新窗重判）
       api.get<SummaryWindow>("/api/config/summary-window")
         .then(setSw).catch(() => setSw(null));
@@ -241,8 +262,7 @@ export default function ImportPanel({ stances, notify, onDone, active = true }: 
     if (sel) batchImport([sel as string]);
   };
 
-  const stanceLabel = (k?: string) =>
-    stances.find((s) => s.name === k)?.label || k || "未知";
+  const stanceLabel = (k?: string) => _stanceLabel(k || "", stances);
 
   // 0.1.5 F5：超墙判定（余量线=窗×0.9，后端 margin 已算好）
   const overWall = !!(preview && sw && sw.provider !== "offline" && sw.window > 0
@@ -288,11 +308,17 @@ export default function ImportPanel({ stances, notify, onDone, active = true }: 
         </label>
         <label>摘要策略
           <select value={strategy} onChange={(e) => setStrategy(e.target.value)}>
-            <option value="auto">自动</option>
-            <option value="map_reduce">Map-Reduce</option>
-            <option value="refine">Refine 链</option>
-            <option value="full_context">全文投喂</option>
+            <option value="auto">自动选择</option>
+            <option value="map_reduce">分章摘要再汇总</option>
+            <option value="refine">逐章滚动细化</option>
+            <option value="full_context">整书一次投喂</option>
           </select>
+          <div className="muted small" style={{ marginTop: "4px" }}>
+            {strategy === "auto" && "按书长自动挑策略"}
+            {strategy === "map_reduce" && "每章各自总结后合并，长书稳妥"}
+            {strategy === "refine" && "一章章读、边读边改总结，连贯性好但慢"}
+            {strategy === "full_context" && "整本直接给模型，需要大窗口"}
+          </div>
         </label>
       </div>
 
@@ -306,8 +332,17 @@ export default function ImportPanel({ stances, notify, onDone, active = true }: 
         </div>
       )}
 
-      {preview && (
-        <div className="confirm-card">
+      {/* 0.1.9 L2：确认屏弹窗化——Esc/遮罩暂收不丢已解析结果，左栏可续 */}
+      {preview && confirmHidden && (
+        <div className="confirm-resume">
+          <span className="muted small">已解析：{meta.title || preview.title || "未命名文档"}</span>
+          <button className="link" onClick={() => setConfirmHidden(false)}>继续确认…</button>
+          <button className="link" onClick={() => setPreview(null)}>丢弃</button>
+        </div>
+      )}
+      {preview && !confirmHidden && (
+        <div className="overlay" onMouseDown={() => setConfirmHidden(true)}>
+        <div className="confirm-card confirm-modal" onMouseDown={(e) => e.stopPropagation()}>
           <h3>{meta.title || preview.title || "未命名文档"}</h3>
           <div className="muted small">
             类型：{preview.source_type || "?"} · 约 {preview.token_estimate ?? "?"} tokens
@@ -429,6 +464,7 @@ export default function ImportPanel({ stances, notify, onDone, active = true }: 
             <button className="primary" onClick={confirmImport} disabled={!!busy}>确认入库</button>
             <button onClick={() => setPreview(null)}>取消</button>
           </div>
+        </div>
         </div>
       )}
 

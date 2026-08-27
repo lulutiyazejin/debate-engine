@@ -54,6 +54,11 @@ class HybridRetriever:
             f_hits = self.db.fts_search(core_claim or implicit_target,
                                         top_k=config.RETRIEVAL_TOP_K_COARSE,
                                         doc_ids=doc_ids)
+        # 0.1.8 M2：待审文档不参与检索（双路命中后统一剔除）
+        pending = self.db.pending_doc_ids()
+        if pending:
+            v_hits = [h for h in v_hits if h["doc_id"] not in pending]
+            f_hits = [h for h in f_hits if h["doc_id"] not in pending]
         fused = rrf_fuse(v_hits, f_hits)[:top_k]
         # 附全文与元数据
         for c in fused:

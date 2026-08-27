@@ -163,21 +163,59 @@ class AlignmentEngine:
 
     # ---------- 消费者 3：图谱关系边写回 ----------
     def build_relations(self, doc_ids: list[str] | None = None,
-                        max_pairs: int = 60) -> dict:
-        """全库（或指定文档）配对判定，写回 relation/target_unit_id。"""
-        units = self.db.list_arg_units()
-        if doc_ids:
-            units = [u for u in units if u["doc_id"] in doc_ids]
-        pairs = self.pair_units(units, units, skip_same_doc=True,
-                                top_pairs=max_pairs)
-        written = 0
-        for p in pairs:
-            j = self.classify_pair(p["a"], p["b"])
-            if j["relation"] in RELATIONS:
-                self.db.update_arg_relation(p["a"]["arg_id"], j["relation"],
-                                            p["b"]["arg_id"])
-                written += 1
-        return {"pairs_checked": len(pairs), "relations_written": written}
+                        max_pairs: int = 60, mode: str | None = None) -> dict:
+        """对齐配对判定并写回 relation/target_unit_id。
+        0.1.9 E1: mode=None(全库)/full(全量重建)=清空后重算/incremental(新×全库交叉)。"""
+        from backend.storage.sqlite_store import get_db
+        db = self.db
+        # 获取全库文档以便查 relations_at
+        docs_map = {d["doc_id"]: d for d in db.list_documents()}
+        
+        if mode == "incremental":
+            # 增量：找出 relations_at=NULL 的文档（未配对过或重提取后失效）
+            new_docs = [doc_id for doc_id, d in docs_map.items()
+                       if d.get("relations_at") is None]
+            if not new_docs:
+                return {"pairs_checked": 0, "relations_written": 0,
+                       "hint": "无新增文档，无需增量更新"}
+            # 新文档的论证单元 × 全库单元交叉配对
+            units_new = [u for u in db.list_arg_units() if u["doc_id"] in new_docs]
+            units_all = db.list_arg_units()
+            pairs = self.pair_units(units_new, units_all, skip_same_doc=True,
+                                   top_pairs=max_pairs * 3)
+            written = 0
+            for p in pairs:
+                j = self.classify_pair(p["a"], p["b"])
+                if j["relation"] in RELATIONS:
+                    db.update_arg_relation(p["a"]["arg_id"], j["relation"],
+                                          p["b"]["arg_id"])
+                    written += 1
+            # E1: 打标 relations_at（对全部新增文档打标，含无单元文档，避免 N 不归零）
+            db.mark_relations_built(new_docs)
+            return {"pairs_checked": len(pairs), "relations_written": written,
+                   "mode": "incremental", "new_doc_count": len(new_docs)}
+        elif mode == "full" or mode is None:
+            # 全量：先清空全部关系边
+            units = db.list_arg_units()
+            for u in units:
+                db.update_arg_relation(u["arg_id"], None, None)
+            # 再重新判定
+            doc_ids = doc_ids or None
+            units = db.list_arg_units() if doc_ids is None else [u for u in db.list_arg_units()
+                                                                if u["doc_id"] in doc_ids]
+            pairs = self.pair_units(units, units, skip_same_doc=True,
+                                   top_pairs=max_pairs)
+            written = 0
+            for p in pairs:
+                j = self.classify_pair(p["a"], p["b"])
+                if j["relation"] in RELATIONS:
+                    db.update_arg_relation(p["a"]["arg_id"], j["relation"],
+                                          p["b"]["arg_id"])
+                    written += 1
+            # E1: 全量重建完成，全库打标 relations_at
+            db.mark_relations_built(None)
+            return {"pairs_checked": len(pairs), "relations_written": written,
+                   "mode": mode or "full"}
 
     # ---------- 消费者 4：溯源追踪 ----------
     def trace(self, claim: str, top_k: int = 10,
@@ -317,6 +355,10 @@ def graph_data(db, stance: str | None = None,
     units = db.list_arg_units(doc_id)
     if stance:
         units = [u for u in units if u["doc_id"] in docs]
+    # 0.1.8 M2：待审文档不参与图谱/脉络
+    pending = db.pending_doc_ids()
+    if pending:
+        units = [u for u in units if u["doc_id"] not in pending]
     ids = {u["arg_id"] for u in units}
     nodes = [{"id": u["arg_id"], "claim": (u.get("claim") or "")[:80],
               "doc_id": u["doc_id"],

@@ -62,3 +62,44 @@ export interface CoordDoc {
 export interface StanceProfile {
   stance: string; count: number; avg: Record<string, number>;
 }
+
+/** 0.1.7 项 5：数值轴全 0 = 疑似旧版离线兜底填充（未提取），非「真中性」 */
+export function isSuspiciousZero(coords: Record<string, number>): boolean {
+  const vals = AXES.map((a) => coords[a.key])
+    .filter((v): v is number => typeof v === "number");
+  return vals.length > 0 && vals.every((v) => v === 0);
+}
+
+/** 0.1.8 V4：雷达 22→17 轴合并映射（近义轴合并显示，数据不动；
+    sign=-1 表示语义反向计入均值，如性别轴正端=流动与文化轴正端=传统相反） */
+export interface RadarAxis { label: string; members: { key: string; sign: 1 | -1 }[] }
+export const RADAR_AXES_17: RadarAxis[] = [
+  { label: "所有制", members: [{ key: "ownership", sign: 1 }] },
+  { label: "权力·组织", members: [{ key: "political_authority", sign: 1 },
+                              { key: "organization", sign: 1 }] },
+  { label: "帝国主义", members: [{ key: "imperialism", sign: 1 }] },
+  { label: "认识论", members: [{ key: "epistemology", sign: 1 }] },
+  { label: "变革速度", members: [{ key: "change_speed", sign: 1 }] },
+  { label: "伦理", members: [{ key: "ethics", sign: 1 }] },
+  { label: "文化·性别", members: [{ key: "culture", sign: 1 },
+                              { key: "gender", sign: -1 }] },
+  { label: "外交·全球化", members: [{ key: "diplomacy", sign: 1 },
+                                { key: "globalization", sign: 1 }] },
+  { label: "技术·AI", members: [{ key: "technology", sign: 1 },
+                             { key: "ai_automation", sign: 1 }] },
+  { label: "分配·福利", members: [{ key: "distribution", sign: 1 },
+                              { key: "welfare", sign: 1 }] },
+  { label: "民主形态", members: [{ key: "democracy_type", sign: 1 }] },
+  { label: "宪政", members: [{ key: "constitutionalism", sign: 1 }] },
+  { label: "身份", members: [{ key: "identity", sign: 1 }] },
+  { label: "世俗", members: [{ key: "secularism", sign: 1 }] },
+  { label: "本体论", members: [{ key: "ontology", sign: 1 }] },
+  { label: "生态", members: [{ key: "ecology", sign: 1 }] },
+  { label: "历史观", members: [{ key: "historical_view", sign: 1 }] },
+];
+
+/** 合并轴取值：成员轴（带符号）均值；单成员直接透传 */
+export function radarValue(avg: Record<string, number>, axis: RadarAxis): number {
+  const vs = axis.members.map((m) => m.sign * (avg[m.key] ?? 0));
+  return vs.reduce((a, b) => a + b, 0) / vs.length;
+}

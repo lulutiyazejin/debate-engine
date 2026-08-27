@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -246,7 +247,7 @@ def models_probe(req: ModelsProbe):
         if r.status_code != 200:
             return {"ok": False, "models": [],
                     "error": f"HTTP {r.status_code}: {r.text[:120]}"}
-        data = r.json().get("data", [])
+        data = json.loads(r.content).get("data", [])  # 0.1.8 S1：防编码推断乱码
         ids = sorted({m.get("id") for m in data if m.get("id")})
         return {"ok": True, "models": list(ids)}
     except Exception as e:  # noqa: BLE001 探测失败要带回原因
@@ -331,7 +332,9 @@ def ollama_status():
     hw = config.load_settings().get("hw_profile") or {}
     rec = hw.get("recommend") or ""
     # 补丁项 1：已装模型 base 列表（大小写不敏感）
-    installed_base = [m.split(":")[0].lower() for m in models]
+    # 0.1.7 项 12：魔搭源模型名带完整路径（modelscope.cn/unsloth/xxx），
+    # 剥路径取末段与 ms_base 口径对齐，否则永不相等 → 按钮恒「下载并启用」
+    installed_base = [m.split(":")[0].split("/")[-1].lower() for m in models]
     cands = []
     for m in oa.candidates():
         compat = mm.runtime_ok(m["name"], version)
@@ -349,7 +352,7 @@ def ollama_status():
             "compat_ok": compat,
             "recommended": m["name"] == rec,
             "installed": installed,
-            "ms_name": m.get("ms_name", "")}))
+            "ms_name": m.get("ms_name", "")})
     return {"running": running, "hint": hint,
             "installed_models": models or [],
             "active_model": active,

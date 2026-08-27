@@ -15,25 +15,38 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import config
 config.mount_extras()   # 组件中心（0.1.4）：已装组件包先挂 sys.path 再注册路由
 from api import (analysis, components, diagnostics, files, import_doc,
-                 kb_package, knowledge, local_models, rebuttal, settings,
-                 stances, workspace)
+                 kb_package, knowledge, local_models, rebuttal, reextract,
+                 settings, stances, workspace, fonts)
 from applog import log_system
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     config.ensure_dirs()
+    # 0.1.9 R1：启动补齐内置 skill 小节（升级不覆盖用户改动，仅追加缺失项）
+    try:
+        from storage.skill_migrator import migrate_skills
+        migrate_skills(config.SKILLS_PATH)
+    except Exception:
+        pass
     log_system("api_startup", host=config.API_HOST, port=config.API_PORT)
     yield
 
 
+class UTF8JSONResponse(JSONResponse):
+    """0.1.8 S1 加固：显式 charset，防老客户端（如 PS5.1）对无 charset 的
+    application/json 按 Latin-1 误读中文；引擎输出本身一直是 UTF-8。"""
+    media_type = "application/json; charset=utf-8"
+
+
 app = FastAPI(title="Debate Engine API", version=config.VERSION,
-              lifespan=lifespan)
+              lifespan=lifespan, default_response_class=UTF8JSONResponse)
 # 桌面壳 WebView（tauri://localhost）跨源访问；服务只绑 127.0.0.1，风险可控
 app.add_middleware(CORSMiddleware, allow_origins=["*"],
                    allow_methods=["*"], allow_headers=["*"])
@@ -46,16 +59,18 @@ app.include_router(settings.router)
 app.include_router(local_models.router)
 app.include_router(kb_package.router)
 app.include_router(analysis.router)
+app.include_router(reextract.router)   # 0.1.7 项 3：重提取坐标后台任务
 app.include_router(stances.router)
 app.include_router(diagnostics.router)
 app.include_router(workspace.router)
 
-# 0.1.3 D12：字体外挂——knowledge_base/fonts 放 ttf/otf/woff2 即放即用，
-# 不随安装包分发字体（体积红线），前端启动时注册 FontFace。
+# 0.1.7 项 11:字体外挂——knowledge_base/fonts 放 ttf/otf/woff2 即放即用，
+# 不随安装包分发字体 (体积红线),前端启动时注册 FontFace。
 _FONTS_DIR = config.KNOWLEDGE_BASE_PATH / "fonts"
 _FONTS_DIR.mkdir(parents=True, exist_ok=True)
-from fastapi.staticfiles import StaticFiles  # noqa: E402
+from fastapi.staticfiles import StaticFiles  # noqa:E402
 app.mount("/fonts", StaticFiles(directory=str(_FONTS_DIR)), name="fonts")
+app.include_router(fonts.router)   # 0.1.7 项 11:字体管理
 
 
 @app.get("/api/fonts")

@@ -101,6 +101,22 @@ class StarPatch(BaseModel):
     starred: bool
 
 
+class ResponseAdd(BaseModel):
+    intent: str = "answer"
+    stance: str = ""
+    input_text: str
+    output_text: str
+    provider: str = ""
+
+
+@router.post("/responses")
+def response_add(req: ResponseAdd):
+    """0.1.8 N1：前端主动存历史（对辩等编排类输出）。"""
+    rid = _db().response_add(req.intent, req.input_text, req.output_text,
+                             "[]", req.provider, req.stance)
+    return {"id": rid}
+
+
 @router.get("/responses")
 def responses(limit: int = 100):
     return {"items": _db().response_list(min(limit, 500))}

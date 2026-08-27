@@ -31,7 +31,7 @@ class RebuttalRequest(BaseModel):
     center: str | None = None
     intent: str = Field(default="rebut",
                         pattern="^(rebut|critique|evaluate)$")
-    material_ids: list[int] = Field(default_factory=list, max_length=20)
+    material_ids: list[int] = Field(default_factory=list)  # 0.1.8 R2: 取消上限
     # 0.1.5 H1：用户拍板后重进的指定槽（含 offline=离线模板）；缺省槽 1
     provider: str | None = None
 
@@ -104,3 +104,66 @@ def rebuttal(req: RebuttalRequest):
             _record(engine, req, acc)
 
     return StreamingResponse(sse(), media_type="text/event-stream")
+
+
+# ---------- 0.1.8 N1：双立场自动对辩（BgTask NDJSON，断流可重连续看） ----------
+
+class DebateRequest(BaseModel):
+    topic: str = Field(min_length=2, max_length=2000)
+    stance_a: str = Field(min_length=1)
+    stance_b: str = Field(min_length=1)
+    rounds: int = Field(default=3, ge=2, le=5)
+    length: int | None = Field(default=None, ge=20, le=MAX_LENGTH)
+
+
+def _debate_worker_factory(req: DebateRequest):
+    def _worker(task):
+        engine = get_engine()
+        total = req.rounds * 2
+        last_text = req.topic     # 首轮 a 立论=议题本身
+        n = 0
+        for rnd in range(1, req.rounds + 1):
+            for side, stance in (("a", req.stance_a), ("b", req.stance_b)):
+                if task.cancelled:
+                    task.emit({"done": True, "ok": False, "detail": "对辩已取消"})
+                    return
+                n += 1
+                task.emit({"status": f"第 {rnd} 轮 · {stance} 发言中…",
+                           "percent": int((n - 1) * 100 / total)})
+                try:
+                    # 轮流以对方上轮输出为 argument 调 rebut 引擎
+                    result = engine.generate(
+                        last_text[:2000], stance, "argument", "rebuttal",
+                        length=req.length, intent="rebut")
+                    text = result.get("rebuttal") or ""
+                except Exception as e:  # noqa: BLE001 单轮失败显式上报后终止
+                    task.emit({"done": True, "ok": False,
+                               "detail": f"第 {rnd} 轮 {stance} 生成失败：{e}"})
+                    return
+                task.emit({"round": rnd, "side": side, "stance": stance,
+                           "text": text,
+                           "percent": int(n * 100 / total)})
+                last_text = text or last_text
+        task.emit({"done": True, "ok": True,
+                   "detail": f"对辩完成：{req.rounds} 轮 × 双方"})
+    return _worker
+
+
+@router.post("/debate")
+def debate(req: DebateRequest, last_seq: int = 0):
+    """双立场对辩：轮流以对方上轮输出为论点调反驳引擎，逐轮 NDJSON。"""
+    if req.stance_a == req.stance_b:
+        raise HTTPException(422, "对辩双方立场不能相同")
+    if "none" in (req.stance_a, req.stance_b):
+        raise HTTPException(422, "无立场不可作为对辩方")
+    from tasks import BgTask
+    task = BgTask.get_or_start("debate", _debate_worker_factory(req))
+    return StreamingResponse(task.follow(last_seq),
+                             media_type="application/x-ndjson")
+
+
+@router.post("/debate/cancel")
+def debate_cancel():
+    """0.1.8 N1：显式取消对辩（断连不杀任务，只有这里杀）。"""
+    from tasks import BgTask
+    return {"cancelled": BgTask.cancel("debate")}

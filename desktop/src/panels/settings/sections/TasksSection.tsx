@@ -84,7 +84,7 @@ export default function TasksSection({ tasks, providers, customs, notify, onSave
                           {!o.configured ? `（${o.reason}）` : ""}
                         </option>
                       );
-                    })}
+                    })}                  
                   </select>
                   <button className="slot-x" title={t.chain.length <= 1
                             ? "至少保留一个槽" : "删除此槽"}
@@ -92,11 +92,13 @@ export default function TasksSection({ tasks, providers, customs, notify, onSave
                           onClick={() => dropSlot(t, i)}>×</button>
                 </span>
               ))}
+            </span>
+            <div style={{textAlign: 'center', marginTop: '6px'}}>
               {t.chain.length < MAX_SLOTS && (
                 <button className="slot-add" title="加一个尝试槽"
-                        onClick={() => addSlot(t)}>＋</button>
+                        onClick={() => addSlot(t)}>＋ 添加备选</button>
               )}
-            </span>
+            </div>
           </div>
         ))}
       </div>

@@ -15,7 +15,7 @@ except ImportError:
     pass
 
 # ---------- 版本（全局唯一来源，main/diagnostics/cli 均引用此处） ----------
-VERSION = "0.1.6"
+VERSION = "0.1.9"
 
 # ---------- 存储后端（服务器级抽象层：当前仅 sqlite，未来可插 postgres） ----------
 STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "sqlite")
@@ -63,8 +63,10 @@ INDEX_MD_PATH = KNOWLEDGE_BASE_PATH / "INDEX.md"
 # 新目录 installer 不打包不覆盖，升级保留。
 INSTALL_DIR = (Path(sys.executable).resolve().parent.parent
                if getattr(sys, "frozen", False) else PROJECT_ROOT)
-MODELS_DIR = INSTALL_DIR / "models"                  # 组件中心下载的模型
-EXTRAS_PATH = INSTALL_DIR / "components"             # python 组件包落盘目录
+
+# 0.1.8 S2：组件落盘跟随 KB_PATH（源码开发环境模式），非 frozen 下 MODELS_DIR=KB_PATH/models
+MODELS_DIR = KNOWLEDGE_BASE_PATH / "models"
+EXTRAS_PATH = KNOWLEDGE_BASE_PATH / "components"    # python 组件包落盘目录
 _BGE_DL = MODELS_DIR / "bge-m3"
 BGE_M3_PATH = Path(os.getenv("BGE_M3_PATH", str(_BGE_DL)))
 

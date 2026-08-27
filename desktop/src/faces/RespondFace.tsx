@@ -4,9 +4,11 @@ import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { api } from "../api";
 import { askConfirm, askInput } from "../components/AppDialog";
+import OverlayMenu, { type MenuItem } from "../components/OverlayMenu";
 import type { StanceOpt } from "../App";
 import ComparePanel from "../panels/ComparePanel";
 import RebutPanel from "../panels/RebutPanel";
+import DebatePanel from "../panels/DebatePanel";
 import { ReportPanel } from "../panels/ReportPanel";
 import SegmentedSlider from "../components/SegmentedSlider";
 
@@ -31,13 +33,14 @@ interface Props {
 const INTENTS = [
   { key: "answer", label: "回答" },
   { key: "analyze", label: "分析" },
+  { key: "debate", label: "对辩" },     // 0.1.8 N1：双立场自动对辩
   { key: "report", label: "综合报告" },
 ] as const;
 
 // 历史记录旧意图词汇保留显示映射（批 3：三意图已并入回答风格表）
 const INTENT_NAME: Record<string, string> = {
   rebut: "反驳", critique: "批判", evaluate: "评价",
-  analyze: "分析", report: "报告", answer: "回答",
+  analyze: "分析", report: "报告", answer: "回答", debate: "对辩",
 };
 
 export default function RespondFace({
@@ -48,13 +51,27 @@ export default function RespondFace({
   const [groups, setGroups] = useState<Group[]>([]);          // 批 4：素材组
   const [groupFold, setGroupFold] = useState<number[]>([]);
   const [selected, setSelected] = useState<number[]>([]);
+  const [leftOpen, setLeftOpen] = useState(true);            // 0.1.8 R4: 收边态
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [histSel, setHistSel] = useState<HistoryItem | null>(null);
   const [side, setSide] = useState<{ title: string; body: ReactNode } | null>(null);
   const [sideOpen, setSideOpen] = useState(true);
   const [localPrefill, setLocalPrefill] = useState(prefill);
+  // 0.1.8 R1：素材右键菜单（行内 × 已删，防误触）
+  const [itemMenu, setItemMenu] = useState<{ x: number; y: number; item: BasketItem } | null>(null);
+  // 0.1.9 R2：素材组组头右键菜单（整组注入 / 改名 / 删除组）
+  const [groupMenu, setGroupMenu] = useState<{ x: number; y: number; group: Group } | null>(null);
 
   useEffect(() => { setLocalPrefill(prefill); }, [prefill]);
+
+  // 0.1.8 R4: persist leftOpen
+  useEffect(() => {
+    const stored = localStorage.getItem("respondLeftOpen");
+    if (stored) setLeftOpen(stored === "true");
+  }, []);
+  useEffect(() => {
+    localStorage.setItem("respondLeftOpen", String(leftOpen));
+  }, [leftOpen]);
 
   const loadBasket = useCallback(async () => {
     try {
@@ -79,7 +96,8 @@ export default function RespondFace({
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
   const removeBasket = async (id: number) => {
-    await api.del(`/api/basket/${id}`).catch((e) => notify(`删除失败: ${e}`));
+    if (!(await askConfirm({ title: "移出素材？", body: "确认移出这条素材吗？" }))) return;
+    await api.del(`/api/basket/${id}`).catch((e) => notify(`删除失败：${e}`));
     loadBasket();
     basketChanged();
   };
@@ -88,10 +106,6 @@ export default function RespondFace({
   const toggleSelect = (id: number, on: boolean) => {
     setSelected((prev) => {
       if (!on) return prev.filter((x) => x !== id);
-      if (prev.length >= 20) {
-        notify("单次注入预算已满（20 条，prompt 物理限制）");
-        return prev;
-      }
       return [...prev, id];
     });
   };
@@ -100,7 +114,6 @@ export default function RespondFace({
     setSelected((prev) => {
       const merged = [...prev];
       for (const it of items) {
-        if (merged.length >= 20) { notify("注入预算已满（20 条），其余未勾选"); break; }
         if (!merged.includes(it.id)) merged.push(it.id);
       }
       return merged;
@@ -111,15 +124,17 @@ export default function RespondFace({
     const name = await askInput({ title: "新建素材组", placeholder: "组名称" });
     if (!name?.trim()) return;
     try { await api.post("/api/groups", { name: name.trim() }); loadBasket(); }
-    catch (e) { notify(`建组失败: ${e}`); }
+    catch (e) { notify(`建组失败：${e}`); }
   };
-
+  // 0.1.9 R2：改名（组头右键菜单入口，公共组不可改名）
   const renameGroup = async (g: Group) => {
-    const name = await askInput({ title: "组改名", initial: g.name });
+    const name = await askInput({ title: `重命名组「${g.name}」`,
+      placeholder: "新组名", initial: g.name });
     if (!name?.trim() || name.trim() === g.name) return;
     try { await api.patch(`/api/groups/${g.id}`, { name: name.trim() }); loadBasket(); }
-    catch (e) { notify(`改名失败: ${e}`); }
+    catch (e) { notify(`改名失败：${e}`); }
   };
+
 
   const deleteGroup = async (g: Group) => {
     if (!(await askConfirm({ title: `删除组「${g.name}」？`,
@@ -151,7 +166,7 @@ export default function RespondFace({
         `> 原始输入：${h.input_text}\n> 生成立场：${h.stance || "—"} · ` +
         `模型：${h.provider || "—"} · ${h.created_at}\n\n${h.output_text}`;
       const saved = await api.post<{ path: string }>("/api/kb/save-text",
-        { filename: `inbox/${name}`, text: md });
+        { path: `inbox/${name}`, content: md });   // 0.1.8 修复：后端字段为 path/content，旧传参 422
       const pv = await api.post<{ doc_id: string }>("/api/import",
         { source: saved.path });
       await api.post("/api/import/confirm",
@@ -163,13 +178,46 @@ export default function RespondFace({
     }
   };
 
+  // 0.1.8 N4：导出 Argdown（Tauri save 对话框选路径 → save-text 落盘 UTF-8）
+  const exportArgdown = async (h: HistoryItem) => {
+    try {
+      const { save } = await import("@tauri-apps/plugin-dialog");
+      const path = await save({
+        defaultPath: `回应-${h.id}.argdown`,
+        filters: [{ name: "Argdown", extensions: ["argdown"] }] });
+      if (!path) return;
+      // 论证结构转 Argdown：首段=主张，后续段落=论据（+ 支持语法）
+      const paras = h.output_text.split(/\n{2,}/).map((s) => s.trim()).filter(Boolean);
+      const claim = (paras[0] || h.input_text).replace(/\s+/g, " ").slice(0, 200);
+      let md = `[主张]: ${claim}\n`;
+      paras.slice(1).forEach((p, i) => {
+        md += `  + <论据${i + 1}>: ${p.replace(/\s+/g, " ")}\n`;
+      });
+      await api.post("/api/kb/save-text", { path, content: md });
+      notify("已导出 Argdown");
+    } catch (e) { notify(`导出失败: ${e}`); }
+  };
+
   return (
     <div className="resp-face">
       {/* 左栏：素材组（批 4）+ 历史 */}
-      <aside className="resp-left">
-        <div className="col-head">
-          素材组 <span className="muted small">已选 {selected.length}/20 · 勾选注入生成</span>
-        </div>
+      <aside className="resp-left" style={{ width: leftOpen ? undefined : '28px', transition: 'width 0.12s' }}>
+        {leftOpen && (
+          <div className="col-head">
+            素材组 <span className="muted small">已选 {selected.length} · 勾选注入生成</span>
+          </div>
+        )}
+        {!leftOpen && (
+          <div className="col-head" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '32px', gap: 4 }}>
+            <span className="badge warn" style={{ minWidth: 20 }}>{selected.length}</span>
+          </div>
+        )}
+        <button title={leftOpen ? "收起" : "展开"} onClick={() => setLeftOpen(!leftOpen)}
+                style={{ position: 'absolute', right: -28, top: 8, width: 28, height: 28,
+                         background: 'var(--bg-2)', border: '1px solid var(--tx-3)', borderRadius: 4,
+                         cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          {leftOpen ? "▸" : "▾"}
+        </button>
         <div className="basket-list">
           {basket.length === 0 && groups.length <= 1 && (
             <div className="empty-state small">
@@ -182,7 +230,10 @@ export default function RespondFace({
             const folded = groupFold.includes(g.id);
             return (
               <div key={g.id} className="mat-group">
-                <div className="tree-stance" onClick={() =>
+                <div className="tree-stance"
+                  onContextMenu={(e) => { e.preventDefault(); e.stopPropagation();
+                    setGroupMenu({ x: e.clientX, y: e.clientY, group: g }); }}
+                  onClick={() =>
                   setGroupFold((prev) => prev.includes(g.id)
                     ? prev.filter((x) => x !== g.id) : [...prev, g.id])}>
                   <svg width="10" height="10" viewBox="0 0 10 10"
@@ -191,29 +242,24 @@ export default function RespondFace({
                           strokeWidth="1.4" strokeLinecap="round" />
                   </svg>
                   {g.name} <span className="muted">({items.length})</span>
+                  {selected.filter(id => items.some(i => i.id === id)).length > 0 && (
+                    <span className="muted small">已选 {selected.filter(id => items.some(i => i.id === id)).length}</span>
+                  )}
                   <span className="spacer" />
                   {items.length > 0 && (
                     <button className="link" title="整组注入"
                             onClick={(e) => { e.stopPropagation(); injectGroup(items); }}>全选</button>
                   )}
-                  {!g.pinned && (
-                    <>
-                      <button className="link" title="改名"
-                              onClick={(e) => { e.stopPropagation(); renameGroup(g); }}>改</button>
-                      <button className="link" title="删组（材料并入公共素材组）"
-                              onClick={(e) => { e.stopPropagation(); deleteGroup(g); }}>×</button>
-                    </>
-                  )}
                 </div>
                 {!folded && items.map((b) => (
-                  <label key={b.id} className={"basket-item" + (b.used ? " used" : "")}>
+                  <label key={b.id} className={"basket-item" + (b.used ? " used" : "")}
+                         onContextMenu={(e) => { e.preventDefault(); setItemMenu({ x: e.clientX, y: e.clientY, item: b }); }}>
                     <input type="checkbox" checked={selected.includes(b.id)}
                            onChange={(e) => toggleSelect(b.id, e.target.checked)} />
                     <span className="basket-text" title={b.excerpt}>
                       {b.excerpt.slice(0, 60)}
                       <i className="muted"> · {b.source || b.item_type}{b.used ? " · 已使用" : ""}</i>
                     </span>
-                    <button className="link" onClick={(e) => { e.preventDefault(); removeBasket(b.id); }}>×</button>
                   </label>
                 ))}
               </div>
@@ -229,7 +275,7 @@ export default function RespondFace({
         </div>
 
         <div className="col-head">
-          回应历史 <span className="muted small">{history.length}</span>
+          生成历史 <span className="muted small">{history.length}</span>
         </div>
         <div className="history-list">
           {history.length === 0 && <div className="muted pad small">生成过的回应会记录在这里</div>}
@@ -272,6 +318,8 @@ export default function RespondFace({
                 {INTENT_NAME[histSel.intent] || histSel.intent} · {histSel.created_at} · {histSel.provider || "—"}
               </span>
               <button className="link" onClick={() => saveToKb(histSel)}>存入知识库</button>
+              {/* 0.1.8 N4：回应结果卡操作行——导出 Argdown */}
+              <button className="link" onClick={() => exportArgdown(histSel)}>导出 Argdown</button>
               <button className="link" onClick={() => {
                 // 批 3：旧意图回填→回答 tab + 对应风格；analyze/report 回自己的 tab
                 const styleMap: Record<string, string> = {
@@ -303,6 +351,10 @@ export default function RespondFace({
                               notify={notify} initialMode="texts" />
               </div>
             )}
+            {/* 0.1.8 N1：双立场自动对辩 */}
+            {intent === "debate" && (
+              <DebatePanel stances={stances} notify={notify} onSaved={loadHistory} />
+            )}
             {intent === "report" && (
               <ReportPanel stances={stances} notify={notify} />
             )}
@@ -322,6 +374,38 @@ export default function RespondFace({
           </div>
         </aside>
       )}
+      {/* 0.1.8 R1：素材右键菜单 */}
+      {itemMenu && (
+        <OverlayMenu x={itemMenu.x} y={itemMenu.y} onClose={() => setItemMenu(null)}
+          items={[
+            { key: "copy", label: "复制摘录", onClick: () => {
+                navigator.clipboard.writeText(itemMenu.item.excerpt).catch(() => {});
+                setItemMenu(null); notify("已复制"); } },
+            { key: "-" , label: "" },
+            { key: "remove", label: "移除出组", danger: true, onClick: () => {
+                const id = itemMenu.item.id; setItemMenu(null); removeBasket(id); } },
+          ]} />
+      )}
+      {/* 0.1.9 R2：素材组组头右键菜单（公共组仅「整组注入」） */}
+      {groupMenu && (() => {
+        const g = groupMenu.group;
+        const items = basket.filter((b) => b.group_id === g.id);
+        const menuItems: MenuItem[] = [
+          { key: "inject", label: "整组注入",
+            onClick: () => { injectGroup(items); setGroupMenu(null); } },
+        ];
+        if (!g.pinned) {
+          menuItems.push(
+            { key: "rename", label: "改名…",
+              onClick: () => { const gg = g; setGroupMenu(null); renameGroup(gg); } },
+            { key: "-", label: "" },
+            { key: "delete", label: "删除组…", danger: true,
+              onClick: () => { const gg = g; setGroupMenu(null); deleteGroup(gg); } },
+          );
+        }
+        return <OverlayMenu x={groupMenu.x} y={groupMenu.y}
+                 onClose={() => setGroupMenu(null)} items={menuItems} />;
+      })()}
     </div>
   );
 }

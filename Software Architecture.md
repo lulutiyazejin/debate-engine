@@ -307,3 +307,18 @@ knowledge_base/                # 知识库数据目录（运行时，用户管�
 | 视觉层 | OKLCH 主色派生+对比兜底；线减法 11→4；高度阶梯 40/32/24；滚动条 token 化 | --err/stance 色/报告不跟主色；--hairline-strong 白名单制 |
 
 行数管理影响：阅读器视图模型/combobox/组件下载管理器新文件各 ≤250 行；`SettingsPanel.tsx` 扩分区后若越线，拆 `settings/` 子模块（批 5 复审）；安装器预置 skill 全文件存在即跳过或 .bak。
+
+---
+
+## 8. 0.1.7 架构变更（详见 PLAN-0.1.7.md）
+
+> 0.1.5/0.1.6 本文未补，见各自 PLAN（图谱五投影/立方自绘/魔搭直连/MinerU 一键）。
+
+| 子系统 | 变更 | 边界说明 |
+|---|---|---|
+| 入库层 | 坐标提取失败语义 0→null + offline 元键；「重新提取坐标」后台任务（三标记清/arg_units 先删后插/provenance 读-改-写） | classifier/indexer 单点；下游 _coords_of/_doc_coords/_center_weight 天然兼容 |
+| 设置层 | 字体分区（download/upload/delete 端点+NDJSON 进度）；魔搭源已装识别（剥路径取末段） | 字体递送复用 0.1.3 D12 管道，不进安装包 |
+| 可视化层 | 立方中心立场相对坐标+距离虚线+默认放大；脉络风格统一；lieflat 对齐（旁注/Mono/可数刻度/动效）；canvas 字体 token 化 | CubeView/GraphPanel/TimelineView；Mono 开关作用五视图 |
+| 模型层 | pull_stream 增传 done/total；进度条通栏三件套 | NDJSON 向后兼容 |
+
+行数管理影响：新增 `settings/sections/FontsSection.tsx` ≤250；CubeView 加中心立场+距离线后若越线拆 `lib/cubeMath.ts`（批 4 复审）。

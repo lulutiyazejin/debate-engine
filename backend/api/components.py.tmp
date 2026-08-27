@@ -1,0 +1,5 @@
+    yield _emit({"done": True, "ok": True,
+                 "detail": ("BGE-M3 运行库需手动安装：\n"
+                            f"1. 打开命令行\n"
+                            f"2. 运行：{py} -m pip install --target {config.EXTRAS_PATH}/bge-lib FlagEmbedding>=1.2\n"
+                            f"3. 完成后重启软件，组件中心将显示“已安装”")})

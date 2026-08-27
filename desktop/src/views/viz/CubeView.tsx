@@ -1,12 +1,13 @@
-// 0.1.6 项 5：3D 立方自绘重写（PLAN-0.1.6 批 4，视觉基准 cube-demo.html）。
-// 零依赖 canvas 2D 弱透视投影（f=80），替换 @antv 3D 链（WebGL 兜底问题一并消失）：
-// 大立方三轴 RGB 渐变场（轴色可自选）、方格只画面朝视角的三个内壁、
-// 立场=1×1×1 小立方（中心=该立场文档三轴均值，未分类硬钉原点）、
-// 文档=场色圆点、公告牌文字远→近排序；拖转/滚轮缩放/悬停提示/复位。
-// 偏好（轴色/透明度/反向/常显标签）经 setUiPref 双写持久化（项 7 键 de.cube.*）。
+// 0.1.6 项 5:3D 立方自绘重写 (PLAN-0.1.6 批 4,视觉基准 cube-demo.html)。
+// 零依赖 canvas 2D 弱透视投影(f=80),替换 @antv 3D 链(WebGL 兜底问题一并消失):
+// 大立方三轴 RGB 渐变场(轴色可自选)、方格只画面朝视角的三个内壁、
+// 立场=1×1×1 小立方 (中心=该立场文档三轴均值，未分类硬钉原点)、
+// 文档=场色圆点、公告牌文字远→近排序;拖转/滚轮缩放/悬停提示/复位。
+// 偏好(轴色/透明度/反向/常显标签)经 setUiPref 双写持久化(项 7 键 de.cube.*)。
 import { useCallback, useEffect, useRef, useState } from "react";
 import Combobox from "../../components/Combobox";
-import { AXES, axisOptions } from "../../lib/axes";
+import { axisOptions, isSuspiciousZero, AXES } from "../../lib/axes";
+import { layoutLabels } from "../../lib/labelLayout";
 import type { CoordDoc } from "../../lib/axes";
 import { setUiPref } from "../../lib/uiPrefs";
 
@@ -25,15 +26,7 @@ function cssVar(name: string, fallback: string): string {
 const DEF_COLS = ["#ff0000", "#00ff00", "#0000ff"];
 const hex2rgb = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
 
-/* 大立方几何：8 顶点 + 6 面（顶点序 + 固定轴与值） */
-const V: number[][] = [];
-for (let i = 0; i < 8; i++)
-  V.push([i & 1 ? 5 : -5, i & 2 ? 5 : -5, i & 4 ? 5 : -5]);
-const FACES = [
-  { v: [0, 1, 3, 2], ax: 0, val: -5 }, { v: [4, 5, 7, 6], ax: 0, val: 5 },
-  { v: [0, 1, 5, 4], ax: 1, val: -5 }, { v: [2, 3, 7, 6], ax: 1, val: 5 },
-  { v: [0, 2, 6, 4], ax: 2, val: -5 }, { v: [1, 3, 7, 5], ax: 2, val: 5 },
-];
+/* 小立方框线顶点序 */
 const BOX_F = [[0, 1, 3, 2], [4, 5, 7, 6], [0, 1, 5, 4],
                [2, 3, 7, 6], [0, 2, 6, 4], [1, 3, 7, 5]];
 
@@ -56,7 +49,11 @@ export default function CubeView({ docs, active, stances }: Props) {
   const [ax, setAx] = useState("ownership");
   const [ay, setAy] = useState("political_authority");
   const [az, setAz] = useState("imperialism");
-  const [cols, setCols] = useState<string[]>(loadCols);
+  // 项 6:中心立场选择器 (选后所有立场/文档坐标减该均值→相对坐标)
+  const [centerStance, setCenterStance] = useState("");   // ""=原点 (绝对坐标)
+  // 项 7:距离虚线开关 (默认关)
+  const [showDistLines, setShowDistLines] = useState(false);
+  const [cols, setCols] = useState<string[]>(loadCols());
   const [alpha, setAlpha] = useState(() => {
     const v = parseInt(localStorage.getItem("de.cube.alpha") || "18", 10);
     return Number.isFinite(v) ? Math.max(0, Math.min(90, v)) : 18;
@@ -89,13 +86,14 @@ export default function CubeView({ docs, active, stances }: Props) {
     ctx.clearRect(0, 0, W, H);
     const { yaw, pitch, zoom } = view.current;
     const txMain = cssVar("--tx-1", "#e8e5df");
+    const a01 = alpha / 100;
     const project = (p: number[]): Proj => {
       const cy = Math.cos(yaw), sy = Math.sin(yaw);
       const cp = Math.cos(pitch), sp = Math.sin(pitch);
       const x = p[0] * cy + p[2] * sy, z = -p[0] * sy + p[2] * cy, y = p[1];
       const y2 = y * cp - z * sp, z2 = y * sp + z * cp;
-      const f = 80, s = f / (f + (z2 / 5) * 6) * zoom;   // 弱透视：小立方更像正方
-      const R = Math.min(W, H) * 0.062;
+      const f = 80, s = f / (f + (z2 / 5) * 6) * zoom;   // 弱透视:小立方更像正方
+      const R = Math.min(W, H) * 0.07;   // 0.1.9 V1: 大立方恢复，撤回 0.062（微调上限 0.075）
       return { x: W / 2 + x * R * s, y: H / 2 - y2 * R * s, d: z2, s };
     };
     const rgb = cols.map(hex2rgb);
@@ -104,83 +102,88 @@ export default function CubeView({ docs, active, stances }: Props) {
         rgb.reduce((s, col, k) => s + col[i] * (c[k] + 5) / 10, 0)) | 0);
       return `rgb(${o})`;
     };
-    /* ---- 大立方：渐变场面 + 内壁方格 + 线框 + 轴名 ---- */
-    const P = V.map(project);
-    const order = FACES.map((f) => ({ f, d: f.v.reduce((s, i) => s + P[i].d, 0) / 4 }))
-      .sort((a, b) => b.d - a.d);   // 远→近
-    const a01 = alpha / 100;
-    for (const { f } of order) {
-      const [pa, pb, , pd] = f.v.map((i) => P[i]);
-      const pts = f.v.map((i) => P[i]);
-      ctx.save(); ctx.globalAlpha = a01;
-      ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
-      for (const q of pts.slice(1)) ctx.lineTo(q.x, q.y);
-      ctx.closePath();
-      const chans = [0, 1, 2].filter((x) => x !== f.ax);
-      /* 基色=固定轴色×该面位置权重；另两轴色沿各自边线性叠加 */
-      const base = rgb[f.ax].map((v) => (v * (f.val + 5) / 10) | 0);
-      ctx.fillStyle = `rgb(${base})`; ctx.fill();
-      const g1 = ctx.createLinearGradient(pa.x, pa.y, pb.x, pb.y);
-      g1.addColorStop(0, `rgba(${rgb[chans[0]]},0)`);
-      g1.addColorStop(1, `rgba(${rgb[chans[0]]},1)`);
-      ctx.fillStyle = g1; ctx.fill();
-      const g2 = ctx.createLinearGradient(pa.x, pa.y, pd.x, pd.y);
-      g2.addColorStop(0, `rgba(${rgb[chans[1]]},0)`);
-      g2.addColorStop(1, `rgba(${rgb[chans[1]]},1)`);
-      ctx.fillStyle = g2; ctx.fill();
-      ctx.restore();
-    }
-    /* 等比方格：只画「面朝视角」的三个内壁（远三面），外表面不画 */
-    ctx.save(); ctx.lineWidth = 1;
-    ctx.strokeStyle = "rgba(128,124,116,.5)";
-    for (const o of order.slice(0, 3)) {
-      const f = o.f;
-      const axes = [0, 1, 2].filter((x) => x !== f.ax);
-      for (let k = 1; k < 5; k++) {
-        const t = -5 + k * 2;
-        for (const [u, w] of [[axes[0], axes[1]], [axes[1], axes[0]]]) {
-          const p1 = [0, 0, 0], p2 = [0, 0, 0];
-          p1[f.ax] = p2[f.ax] = f.val; p1[u] = t; p2[u] = t;
-          p1[w] = -5; p2[w] = 5;
-          const q1 = project(p1), q2 = project(p2);
-          ctx.beginPath(); ctx.moveTo(q1.x, q1.y); ctx.lineTo(q2.x, q2.y); ctx.stroke();
+    // 0.1.9 V1：大立方几何（±5 立方体，六面渐变场 + 内壁方格 + 线框 + 0 点虚线 + 轴端标注）
+    const CV: number[][] = [];
+    for (let i = 0; i < 8; i++) CV.push([i & 1 ? 5 : -5, i & 2 ? 5 : -5, i & 4 ? 5 : -5]);
+    const FACES = [
+      { v: [0, 1, 3, 2], axf: 0, val: -5 }, { v: [4, 5, 7, 6], axf: 0, val: 5 },
+      { v: [0, 1, 5, 4], axf: 1, val: -5 }, { v: [2, 3, 7, 6], axf: 1, val: 5 },
+      { v: [0, 2, 6, 4], axf: 2, val: -5 }, { v: [1, 3, 7, 5], axf: 2, val: 5 },
+    ];
+    const AXN: [string, string][] = [ax, ay, az].map((k) => {
+      const m = AXES.find((a2) => a2.key === k); return m ? [m.neg, m.pos] : ["-", "+"];
+    }) as [string, string][];
+    const gridCol = cssVar("--tx-4", "rgba(138,131,117,.55)");
+    const wireCol = cssVar("--tx-2", "rgba(232,229,223,.8)");
+    const halo = cssVar("--bg-0", "#16181d");
+    const capCol = cssVar("--tx-3", "#8a8378");
+    const drawCube = () => {
+      const P = CV.map(project);
+      const order = FACES.map((f) => ({ f, d: f.v.reduce((s, i) => s + P[i].d, 0) / 4 }))
+        .sort((a2, b2) => b2.d - a2.d);   // 远→近
+      for (const { f } of order) {
+        const [pa, pb, pc, pd] = f.v.map((i) => P[i]);
+        ctx.save(); ctx.globalAlpha = a01;
+        ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.lineTo(pb.x, pb.y);
+        ctx.lineTo(pc.x, pc.y); ctx.lineTo(pd.x, pd.y); ctx.closePath();
+        const chans = [0, 1, 2].filter((x) => x !== f.axf);
+        const base = rgb[f.axf].map((v) => (v * (f.val + 5) / 10) | 0);
+        ctx.fillStyle = `rgb(${base})`; ctx.fill();
+        const g1 = ctx.createLinearGradient(pa.x, pa.y, pb.x, pb.y);
+        g1.addColorStop(0, `rgba(${rgb[chans[0]]},0)`);
+        g1.addColorStop(1, `rgba(${rgb[chans[0]]},1)`);
+        ctx.fillStyle = g1; ctx.fill();
+        const g2 = ctx.createLinearGradient(pa.x, pa.y, pd.x, pd.y);
+        g2.addColorStop(0, `rgba(${rgb[chans[1]]},0)`);
+        g2.addColorStop(1, `rgba(${rgb[chans[1]]},1)`);
+        ctx.fillStyle = g2; ctx.fill();
+        ctx.restore();
+      }
+      // 内壁方格：只画面朝视角的三个远壁
+      ctx.save(); ctx.lineWidth = 1.0; ctx.strokeStyle = gridCol;
+      for (const o of order.slice(0, 3)) {
+        const f = o.f; const axes2 = [0, 1, 2].filter((x) => x !== f.axf);
+        for (let k = 1; k < 5; k++) {
+          const t = -5 + k * 2;
+          for (const [u, w] of [[axes2[0], axes2[1]], [axes2[1], axes2[0]]]) {
+            const p1 = [0, 0, 0], p2 = [0, 0, 0];
+            p1[f.axf] = p2[f.axf] = f.val; p1[u] = t; p2[u] = t; p1[w] = -5; p2[w] = 5;
+            const q1 = project(p1), q2 = project(p2);
+            ctx.beginPath(); ctx.moveTo(q1.x, q1.y); ctx.lineTo(q2.x, q2.y); ctx.stroke();
+          }
         }
       }
-    }
-    ctx.restore();
-    /* 线框 + 三轴 0 点参考线 */
-    ctx.save(); ctx.strokeStyle = "rgba(128,124,116,.8)"; ctx.lineWidth = 1.2;
-    for (let i = 0; i < 8; i++) for (let j = i + 1; j < 8; j++) {
-      const diff = i ^ j;
-      if (diff === 1 || diff === 2 || diff === 4) {
-        ctx.beginPath(); ctx.moveTo(P[i].x, P[i].y); ctx.lineTo(P[j].x, P[j].y); ctx.stroke();
+      ctx.restore();
+      // 线框
+      ctx.save(); ctx.strokeStyle = wireCol; ctx.lineWidth = 1.2;
+      for (let i = 0; i < 8; i++) for (let j = i + 1; j < 8; j++) {
+        const diff = i ^ j;
+        if (diff === 1 || diff === 2 || diff === 4) {
+          ctx.beginPath(); ctx.moveTo(P[i].x, P[i].y); ctx.lineTo(P[j].x, P[j].y); ctx.stroke();
+        }
       }
-    }
-    ctx.setLineDash([4, 4]); ctx.strokeStyle = "rgba(128,124,116,.45)";
-    for (const a of [0, 1, 2]) {
-      const p1 = [0, 0, 0], p2 = [0, 0, 0];
-      p1[a] = -5; p2[a] = 5;
-      const q1 = project(p1), q2 = project(p2);
-      ctx.beginPath(); ctx.moveTo(q1.x, q1.y); ctx.lineTo(q2.x, q2.y); ctx.stroke();
-    }
-    /* 轴尽头标名字：-端=neg / +端=pos（axes.ts 语义） */
-    ctx.setLineDash([]);
-    const metas = [ax, ay, az].map((k) => AXES.find((m) => m.key === k));
-    const halo = cssVar("--bg-0", "#16181d");
-    ctx.font = "600 12px 'Microsoft YaHei',sans-serif"; ctx.textAlign = "center";
-    for (const a of [0, 1, 2]) {
-      const m = metas[a];
-      if (!m) continue;
-      for (const [end, txt] of [[-1, m.neg], [1, m.pos]] as [number, string][]) {
-        const p = [0, 0, 0]; p[a] = end * 5.9;
-        const q = project(p);
-        ctx.lineWidth = 3; ctx.strokeStyle = halo;
-        ctx.strokeText(txt, q.x, q.y);
-        ctx.fillStyle = txMain; ctx.fillText(txt, q.x, q.y);
+      // 三轴 0 点虚线
+      ctx.setLineDash([4, 4]); ctx.strokeStyle = gridCol;
+      for (const axi of [0, 1, 2]) {
+        const p1 = [0, 0, 0], p2 = [0, 0, 0]; p1[axi] = -5; p2[axi] = 5;
+        const q1 = project(p1), q2 = project(p2);
+        ctx.beginPath(); ctx.moveTo(q1.x, q1.y); ctx.lineTo(q2.x, q2.y); ctx.stroke();
       }
-    }
-    ctx.restore();
-    /* ---- 数据：文档行 + 立场小立方（中心=均值，未分类硬钉原点） ---- */
+      ctx.setLineDash([]);
+      // 轴端标注（neg/pos 语义，与 axes.ts 一致）
+      ctx.font = "600 12px 'Microsoft YaHei',sans-serif"; ctx.textAlign = "center";
+      for (const axi of [0, 1, 2]) {
+        for (const [end, txt] of [[-1, AXN[axi][0]], [1, AXN[axi][1]]] as [number, string][]) {
+          const p = [0, 0, 0]; p[axi] = end * 5.9;
+          const q = project(p);
+          ctx.lineWidth = 3; ctx.strokeStyle = halo; ctx.strokeText(txt, q.x, q.y);
+          ctx.fillStyle = capCol; ctx.fillText(txt, q.x, q.y);
+        }
+      }
+      ctx.restore();
+    };
+    drawCube();   // 先画大立方（在小立方/点之后）
+    // 0.1.9 V1：两遍算法——先算全部立场 rawCen，再取 centerStance 均值统一减偏移
     const rows: Row[] = docs
       .filter((d) => ax in d.coords && ay in d.coords && az in d.coords)
       .map((d) => ({ s: d.stance || "",
@@ -191,16 +194,22 @@ export default function CubeView({ docs, active, stances }: Props) {
       const g = groups.get(r.s);
       if (g) g.push(r); else groups.set(r.s, [r]);
     }
-    const boxes: Box[] = [...groups.entries()].map(([s, g]) => ({
-      s,
-      name: s === "" ? "未分类"
-        : (stances.find((x) => x.name === s)?.label || s),
-      /* 均值夹到 ±4.5：1×1×1 小立方不越大立方边界 */
-      cen: s === "" ? [0, 0, 0]
-        : [0, 1, 2].map((i) => Math.max(-4.5, Math.min(4.5,
-            g.reduce((a2, d) => a2 + d.c[i], 0) / g.length))),
-      n: g.length,
-    }));
+    // 第一遍：各立场绝对均值 rawCen
+    const rawCens = new Map<string, number[]>();
+    for (const [s, g] of groups) {
+      rawCens.set(s, [0, 1, 2].map((i) => Math.max(-4.5, Math.min(4.5,
+        g.reduce((a2, d) => a2 + d.c[i], 0) / g.length))));
+    }
+    // 偏移源：centerStance 的 rawCen（未选=原点）；文档点、小立方、命中表同一偏移源
+    const off = (centerStance && rawCens.has(centerStance))
+      ? rawCens.get(centerStance)! : [0, 0, 0];
+    const shift = (c: number[]) => [c[0] - off[0], c[1] - off[1], c[2] - off[2]];
+    // 第二遍：小立方统一减偏移
+    const boxes: Box[] = [...groups.entries()].map(([s, g]) => {
+      const cen = shift(rawCens.get(s)!);
+      return { s, name: s === "" ? "未分类" : (stances.find((x) => x.name === s)?.label || s),
+               cen, n: g.length };
+    });
     const stanceColor = (s: string) => {
       if (s === "") return cssVar("--tx-3", "#8a8378");
       const i = stances.findIndex((x) => x.name === s);
@@ -229,13 +238,13 @@ export default function CubeView({ docs, active, stances }: Props) {
       }
       ctx.restore();
     };
-    /* 深度队列：小立方 → 圆点，统一远→近；文字最后公告牌化 */
+    /* 深度队列:小立方 → 圆点，统一远→近;文字最后公告牌化 */
     const hover = hoverRef.current;
     type Item = { d: number; kind: "box"; b: Box } | { d: number; kind: "dot"; p: Proj; doc: Row };
     const items: Item[] = [];
     for (const b of boxes) items.push({ d: project(b.cen).d, kind: "box", b });
     for (const r of rows) {
-      const p = project(r.c);
+      const p = project(shift(r.c));
       items.push({ d: p.d, kind: "dot", p, doc: r });
     }
     items.sort((a2, b2) => b2.d - a2.d);
@@ -260,24 +269,34 @@ export default function CubeView({ docs, active, stances }: Props) {
       }
     }
     texts.sort((a2, b2) => b2.dep - a2.dep);
-    for (const t of texts) {
+    // 0.1.8 V3：公告牌标签防重叠（阶梯错位，仍撞聚合 +N，hover 仍可逐个读名）
+    const laid = layoutLabels(texts.map((t) => {
+      const fs = Math.max(10, Math.min(20, 13 * t.c.s));
+      return { x: t.c.x, y: t.c.y - (t.big ? 14 * t.c.s : 10),
+               w: t.txt.length * fs * 0.62 + 6, h: fs + 2, text: t.txt };
+    }));
+    texts.forEach((t, i) => {
+      const L = laid[i];
+      if (L.hidden) return;
       const fs = Math.max(10, Math.min(20, 13 * t.c.s));
       ctx.save();
       ctx.font = `${t.big ? 600 : 400} ${fs}px "Microsoft YaHei",sans-serif`;
-      ctx.textAlign = "center"; ctx.lineWidth = 3; ctx.strokeStyle = halo;
-      const y = t.c.y - (t.big ? 14 * t.c.s : 10);
-      ctx.strokeText(t.txt, t.c.x, y);
-      ctx.fillStyle = t.col; ctx.fillText(t.txt, t.c.x, y);
+      ctx.textAlign = "center"; ctx.lineWidth = 3;
+      const halo = cssVar("--bg-0", "#16181d");
+      ctx.strokeStyle = halo;
+      const label = L.extra ? `${t.txt} +${L.extra.length}` : t.txt;
+      ctx.strokeText(label, L.x, L.y);
+      ctx.fillStyle = t.col; ctx.fillText(label, L.x, L.y);
       ctx.restore();
-    }
-    /* 命中表（悬停用） */
+    });
+    /* 命中表 (悬停用) */
     const hits: Hit[] = [];
     for (const b of boxes)
       hits.push({ kind: "box", b, p: project(b.cen), r: 3 * view.current.zoom * 2 });
     for (const r of rows)
-      hits.push({ kind: "dot", doc: r, p: project(r.c), r: 6 });
+      hits.push({ kind: "dot", doc: r, p: project(shift(r.c)), r: 6 });
     hitsRef.current = hits;
-  }, [docs, ax, ay, az, cols, alpha, labels, stances]);
+  }, [docs, ax, ay, az, cols, alpha, labels, centerStance, stances]);
 
   const drawRef = useRef(draw);
   drawRef.current = draw;
@@ -293,7 +312,7 @@ export default function CubeView({ docs, active, stances }: Props) {
     return () => ro.disconnect();
   }, []);
 
-  // 交互：拖转（可反向）/滚轮缩放/悬停命中
+  // 交互:拖转 (可反向)/滚轮缩放/悬停命中
   useEffect(() => {
     const cv = cvRef.current;
     if (!cv) return;
@@ -331,7 +350,7 @@ export default function CubeView({ docs, active, stances }: Props) {
     const wheel = (e: WheelEvent) => {
       e.preventDefault();
       const v = view.current;
-      v.zoom = Math.max(0.4, Math.min(3.2, v.zoom * (e.deltaY > 0 ? 0.92 : 1.08)));
+      v.zoom = Math.max(0.4, Math.min(4, v.zoom * (e.deltaY > 0 ? 0.92 : 1.08)));   // 0.1.8 V2：上限 3.2→4
       drawRef.current();
     };
     const leave = () => { hoverRef.current = null; setTip(null); };
@@ -396,8 +415,21 @@ export default function CubeView({ docs, active, stances }: Props) {
                  onChange={(e) => { setLabels(e.target.checked);
                    setUiPref("de.cube.labels", e.target.checked ? "1" : "0"); }} />
           常显标签</label>
+        {/* 项 6:中心立场选择器 */}
+        <select value={centerStance} onChange={(e) => setCenterStance(e.target.value)}>
+          <option value="">原点 (绝对坐标)</option>
+          {stances.map(s => <option key={s.name} value={s.name}>{s.label}</option>)}
+        </select>
+        {/* 项 7:距离虚线开关 (默认关) */}
+        <label className="chk">
+          <input type="checkbox" checked={showDistLines}
+                 onChange={(e) => setShowDistLines(e.target.checked)} /> 距离虚线</label>
         <button onClick={reset}>复位</button>
       </div>
+      {/* 0.1.8 V3：全零引导横幅 */}
+      {docs.length > 0 && docs.every((d) => isSuspiciousZero(d.coords)) && (
+        <div className="viz-nogl">坐标未提取——到馆藏点「重新提取坐标」后这里才有分布</div>
+      )}
       <div ref={hostRef} className="viz-canvas viz-cube">
         <canvas ref={cvRef} className="cube-cv" />
         {tip && (

@@ -9,7 +9,7 @@ Unicode true
 
 !define APP_NAME "Debate Engine"
 !define APP_ID "DebateEngine"
-!define APP_VERSION "0.1.6"
+!define APP_VERSION "0.1.9"
 !define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_ID}"
 
 Name "${APP_NAME} ${APP_VERSION}"
@@ -114,7 +114,7 @@ Section "程序主体（必需）" SecMain
     SetOutPath "$INSTDIR"
     File "/oname=Debate Engine.exe" "..\..\desktop\src-tauri\target\release\desktop.exe"
 
-    ; 引擎（PyInstaller onedir，壳以隐藏子进程拉起 engine\DebateEngine.exe serve）
+    ; 引擎（PyInstaller onedir，Tauri shell 直接调用 engine/DebateEngine.exe serve）
     SetOutPath "$INSTDIR\engine"
     File /r "..\dist\DebateEngine\*.*"
 

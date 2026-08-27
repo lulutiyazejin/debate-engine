@@ -39,7 +39,8 @@ class ConfirmMixin:
             "source_path": str(pv.source),
             "provenance": {"source": pv.source,
                            "coordinates": pv.coordinates,
-                           "classification": pv.classification}})
+                           "classification": pv.classification},
+            "year_raw": getattr(pv.parsed, "_year_raw", None)})  # 0.1.9 D1
 
         texts = [c.text for c in pv.chunks]
         # Stage 2 向量化（批量，此处执行以免预览阶段白算未确认的文档）

@@ -10,6 +10,8 @@ import LibraryFace from "./faces/LibraryFace";
 import RespondFace from "./faces/RespondFace";
 import SettingsPanel from "./panels/SettingsPanel";
 import DialogHost from "./components/AppDialog";
+import OverlayMenu from "./components/OverlayMenu";
+import type { MenuItem as OMenuItem } from "./components/OverlayMenu";
 import { initTheme, initExternalFonts } from "./theme";
 import { syncUiPrefs } from "./lib/uiPrefs";
 import "./tokens.css";
@@ -23,6 +25,10 @@ export interface DocRow {
   doc_type?: string;
   summary?: string;
   coordinates?: string;
+  year?: number;
+  source_type?: string;
+  import_date?: string;
+  review_status?: string;   // 0.1.8 M2：approved | pending
   [k: string]: unknown;
 }
 
@@ -111,13 +117,14 @@ function App() {
   const [maximized, setMaximized] = useState(false);
   const [tourStep, setTourStep] = useState(() =>
     localStorage.getItem("de.tour") ? -1 : 0);
-  const [basketCount, setBasketCount] = useState(0);
   const [basketVersion, setBasketVersion] = useState(0);
   const [libraryQuery] = useState("");
   const [respondPrefill, setRespondPrefill] =
     useState<{ stance?: string; argument?: string }>({});
   const [toast, setToast] = useState("");
   const toastTimer = useRef<number | undefined>(undefined);
+  // 0.1.8 G3/G4：全局自绘右键菜单（选中文字前置素材项）
+  const [gmenu, setGmenu] = useState<{ x: number; y: number; sel: string } | null>(null);
   const faceRef = useRef<Face>("library");
   faceRef.current = face;
 
@@ -138,11 +145,8 @@ function App() {
   }, [notify]);
 
   const refreshBasket = useCallback(async () => {
-    try {
-      const r = await api.get<{ count: number }>("/api/basket");
-      setBasketCount(r.count);
-      setBasketVersion((v) => v + 1);
-    } catch { /* 引擎未就绪时静默 */ }
+    // 0.1.8 Q4：顶栏徽章已删，已选数改显在回应面素材组头
+    setBasketVersion((v) => v + 1);
   }, []);
 
   useEffect(() => { initTheme(); }, []);
@@ -279,6 +283,19 @@ function App() {
     blacklist: (s.method_blacklist as string[] | undefined) || [],   // 批 3：笔法兼容
   })), [stances]);
 
+  // ---------- 0.1.8 G3/G4：全局自绘右键 ----------
+  // 白名单放行原生（输入框保系统粘贴）；业务菜单已 preventDefault 则不叠加；
+  // 手势滑动期由 window 捕获层 stopPropagation 拦截，不会到达这里
+  const onGlobalCtx = useCallback((e: React.MouseEvent) => {
+    const t = e.target as HTMLElement;
+    if (t.closest("input, textarea, [contenteditable='']") ||
+        t.closest("[contenteditable='true']")) return;
+    if (e.defaultPrevented) return;
+    e.preventDefault();
+    const sel = window.getSelection()?.toString().trim() || "";
+    setGmenu({ x: e.clientX, y: e.clientY, sel });
+  }, []);
+
   const win = getCurrentWindow();
 
   if (!boot.ready) {
@@ -308,8 +325,7 @@ function App() {
   const dragOffset = dragX !== null ? (dragX / window.innerWidth) * 50 : 0;
 
   return (
-    <div className="shell2">
-      {/* C1/C2 无外框功能条：整条空白带=拖动区，双击=最大化/还原 */}
+    <div className="shell2" onContextMenu={onGlobalCtx}>
       <header className="topbar" data-tauri-drag-region
               onDoubleClick={(e) => {
                 if ((e.target as HTMLElement).closest("button")) return;
@@ -322,7 +338,6 @@ function App() {
           <button className={face === "respond" ? "on" : ""}
                   onClick={() => switchFace("respond")}>
             <IcoResp />回应
-            {basketCount > 0 && <span className="badge">{basketCount}</span>}
           </button>
         </nav>
         <span className="caps" data-tauri-drag-region>
@@ -362,6 +377,33 @@ function App() {
       {/* 0.1.6 项 4：手势期提示条（松开才切，滑回可取消） */}
       {dragX !== null && (
         <div className="gesture-hint">松开切面 · 滑回取消</div>)}
+      {/* 0.1.8 G3/G4：全局右键菜单（选中文字→素材/复制；否则通用项） */}
+      {gmenu && (() => {
+        const items: OMenuItem[] = [];
+        if (gmenu.sel) {
+          items.push({ key: "basket", label: `加入素材组（选中 ${gmenu.sel.length} 字）`,
+            onClick: async () => {
+              setGmenu(null);
+              try {
+                await api.post("/api/basket", { item_type: "chunk", ref_id: "manual",
+                  excerpt: gmenu.sel.slice(0, 800), source: "选中文字摘录", group_id: null });
+                notify("已加入公共素材组");
+                refreshBasket();
+              } catch (err) { notify(`加入失败: ${err}`); }
+            } });
+          items.push({ key: "copy", label: "复制", onClick: () => {
+            navigator.clipboard.writeText(gmenu.sel).catch(() => {});
+            setGmenu(null);
+          } });
+          items.push({ key: "-", label: "" });
+        }
+        items.push({ key: "refresh", label: "刷新视图",
+          onClick: () => { setGmenu(null); refreshDocs(); notify("已刷新"); } });
+        items.push({ key: "settings", label: "打开设置",
+          onClick: () => { setGmenu(null); setSettingsOpen(true); } });
+        return <OverlayMenu x={gmenu.x} y={gmenu.y} items={items}
+                            onClose={() => setGmenu(null)} />;
+      })()}
       <DialogHost />
 
       {/* 设置：全屏覆盖浮层 */}

@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -24,6 +25,7 @@ from fastapi.responses import StreamingResponse
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import config
 from models.embedder import embedder_status, get_embedder, reset_embedder
+from tasks import BgTask
 
 router = APIRouter(prefix="/api/components", tags=["components"])
 
@@ -36,8 +38,9 @@ _REGISTRY: dict[str, dict] = {
     "bge-m3": {
         "label": "BGE-M3 嵌入模型", "kind": "model", "size_hint": "~2.2GB",
         "desc": "生产级语义向量（装完建议全库重嵌入）；未装时用哈希降级向量",
-        # 0.1.6 拍板 1A：官方源多文件清单（GitHub Release 单资产≤2GiB 装不下
-        # pytorch_model.bin 2.27GB）；两源均实测 206 断点续传。小文件先、大权重后。
+        # 0.1.8 S2:target 用 KB_PATH 父目录=models (兼容 frozen/源码不同数据根)
+        "target": lambda: Path("Z:/DebateEngine/models/bge-m3"),
+        # 0.1.6 拍板 1A：魔搭 resolve 直链（实测 37MB/s 直连 +206 续传），主源；GitHub 降备源
         "sources": ["https://modelscope.cn/models/BAAI/bge-m3/resolve/master",
                     "https://hf-mirror.com/BAAI/bge-m3/resolve/main"],
         "files": ["config.json", "config_sentence_transformers.json",
@@ -45,7 +48,6 @@ _REGISTRY: dict[str, dict] = {
                   "special_tokens_map.json", "tokenizer_config.json",
                   "sentencepiece.bpe.model", "1_Pooling/config.json",
                   "tokenizer.json", "pytorch_model.bin"],
-        "target": lambda: config.MODELS_DIR / "bge-m3",
         "pip_dev": ["FlagEmbedding>=1.2"],
     },
     "ocr": {
@@ -71,6 +73,16 @@ _REGISTRY: dict[str, dict] = {
 }
 
 
+def _bge_lib_ok() -> bool:
+    """0.1.8 S2：FlagEmbedding 可导入探测（模型文件与运行库分离分发，
+    两者齐全才算真装好；否则 embedder 静默回落哈希词袋）。"""
+    try:
+        import FlagEmbedding  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
 def _state(name: str, spec: dict) -> str:
     if spec["kind"] == "external":
         try:
@@ -83,6 +95,9 @@ def _state(name: str, spec: dict) -> str:
         # 文件清单制：全部落齐才算已装（.part 残体不算）
         if not all((target / f).exists() for f in spec["files"]):
             return "missing"
+        # 0.1.8 S2：模型齐但运行库缺 → lib-missing（前端显「安装运行库」）
+        if name == "bge-m3" and not _bge_lib_ok():
+            return "lib-missing"
     elif not target.exists() or not any(target.iterdir()):
         return "missing"
     if (target / ".disabled").exists():
@@ -288,24 +303,98 @@ def _post_install(name: str) -> None:
 
 def _done_detail(name: str) -> str:
     if name == "bge-m3":
-        return "BGE-M3 已安装并热生效；建议到卡片上点「全库重嵌入」升级旧向量"
+        # 0.1.8 S2：按库真实状态说话（此前冻结版只下模型不装库，
+        # 「已热生效」是虚假承诺——is_fallback 仍 true）
+        if _bge_lib_ok():
+            return "BGE-M3 已安装并热生效；建议到卡片上点「全库重嵌入」升级旧向量"
+        return "模型文件已下齐；还差运行库——请再点「安装运行库」完成启用"
     return f"{_REGISTRY[name]['label']} 已安装并热生效"
 
 
 @router.post("/{name}/install")
-def install_component(name: str):
+def install_component(name: str, last_seq: int = 0):
     spec = _REGISTRY.get(name)
     if not spec:
         raise HTTPException(404, f"未知组件 {name}")
     if spec["kind"] == "external":
         # 0.1.6 补丁项 7：MinerU 支持一键装（pip 进组件目录），其他外部引擎仍拒
+        # 0.1.8 S3：迁 BgTask——断流不杀 pip，重连带 last_seq 续看进度
         if name == "mineru":
-            return StreamingResponse(_install_mineru_stream(),
+            task = BgTask.get_or_start("install-mineru", _mineru_worker)
+            return StreamingResponse(task.follow(last_seq),
                                      media_type="application/x-ndjson")
         raise HTTPException(422, "外部引擎请按官网安装，本软件只做检测")
+    # 0.1.8 S2：bge-m3 模型文件已齐但运行库缺 → 补装 FlagEmbedding
+    #（冻结版此前无库安装通道，模型白躺——is_fallback 根因）
+    if name == "bge-m3" and spec.get("files"):
+        target = spec["target"]()
+        if all((target / f).exists() for f in spec["files"]) and not _bge_lib_ok():
+            task = BgTask.get_or_start("install-bge-m3", _bge_lib_worker)
+            return StreamingResponse(task.follow(last_seq),
+                                     media_type="application/x-ndjson")
     stream = (_download_files_stream(name, spec) if spec.get("files")
               else _download_stream(name, spec))
     return StreamingResponse(stream, media_type="application/x-ndjson")
+
+
+def _bge_lib_worker(task: BgTask):
+    """0.1.8 S2+S3：给冻结引擎补 FlagEmbedding 运行库（BgTask 线程内，
+    断流不杀 pip）。pip --target 锁 cp312/win_amd64，装完热生效。"""
+    import subprocess
+
+    py = _find_system_python()
+    if not py:
+        task.emit({"done": True, "ok": False,
+                   "detail": "未找到系统 Python（补装运行库需要）。"
+                             "请先到 python.org 安装 Python 3.10+ 后重试"})
+        return
+    target = config.EXTRAS_PATH / "bge-lib"
+    target.mkdir(parents=True, exist_ok=True)
+    task.emit({"status": "开始安装 FlagEmbedding 运行库（约 300MB 依赖，"
+                         "断开页面任务也会在后台继续）…", "percent": 1})
+    cmd = [py]
+    if py == "py":
+        cmd.append("-3")
+    cmd += ["-m", "pip", "install", "--target", str(target),
+            "--only-binary=:all:", "--platform", "win_amd64",
+            "--implementation", "cp", "--python-version", "312",
+            "--upgrade", "--no-warn-script-location", "--progress-bar", "off",
+            "FlagEmbedding>=1.2"]
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, text=True,
+                            encoding="utf-8", errors="replace",
+                            creationflags=flags)
+    try:
+        assert proc.stdout is not None
+        n = 0
+        for line in proc.stdout:
+            if task.cancelled:
+                proc.kill()
+                task.emit({"done": True, "ok": False,
+                           "detail": "已取消；已装部分保留，可重试续装"})
+                return
+            line = line.strip()
+            if not line:
+                continue
+            n += 1
+            task.emit({"status": line[:120], "percent": min(95, 5 + n * 2)})
+        if proc.wait() != 0:
+            task.emit({"done": True, "ok": False,
+                       "detail": ("pip 退出非 0；已装部分保留可重试。"
+                                  "反复失败可手动运行："
+                                  f"{py} -m pip install --target {target} "
+                                  "FlagEmbedding>=1.2")})
+            return
+        _post_install("bge-m3")
+        ok = _bge_lib_ok()
+        task.emit({"done": True, "ok": ok,
+                   "detail": ("BGE-M3 运行库已装并热生效；建议点「全库重嵌入」"
+                              "升级旧向量" if ok else
+                              "库已落盘但热加载失败，重启软件后生效")})
+    finally:
+        if proc.poll() is None and task.cancelled:
+            proc.kill()
 
 
 def _find_system_python() -> str | None:
@@ -341,29 +430,26 @@ def _has_nvidia_gpu() -> bool:
         return False
 
 
-def _install_mineru_stream():
-    """0.1.6 补丁项 7：MinerU 一键装——系统 Python 跑
+def _mineru_worker(task: BgTask):
+    """0.1.6 补丁项 7 + 0.1.8 S3：MinerU 一键装——系统 Python 跑
     `pip install --target 组件目录`，锁 cp312/win_amd64 轮子（与冻结引擎同 ABI）；
-    有 N 卡加 cu121 索引装 GPU torch（download.pytorch.org 已入直连白名单）；
-    模型权重不在本流范围（首次解析时按 MinerU 官方机制下载）。
-    断流（取消）时 kill 子进程，已装部分保留可重试。"""
+    有 N 卡加 cu121 索引装 GPU torch。BgTask 线程内跑：断流不杀 pip，
+    只有取消按钮（cancel 端点）才杀子进程；已装部分保留可重试。"""
     import subprocess
-
-    def _emit(obj: dict) -> str:
-        return json.dumps(obj, ensure_ascii=False) + "\n"
 
     py = _find_system_python()
     if not py:
-        yield _emit({"done": True, "ok": False,
-                     "detail": "未找到系统 Python（MinerU 安装需要）。"
-                               "请先到 python.org 安装 Python 3.10+ 后重试，"
-                               "或按官网说明手动安装"})
+        task.emit({"done": True, "ok": False,
+                   "detail": "未找到系统 Python（MinerU 安装需要）。"
+                             "请先到 python.org 安装 Python 3.10+ 后重试，"
+                             "或按官网说明手动安装"})
         return
     target = config.EXTRAS_PATH / "mineru"
     target.mkdir(parents=True, exist_ok=True)
     gpu = _has_nvidia_gpu()
-    yield _emit({"status": f"检测到{'N 卡，装 GPU 版（cu121）' if gpu else '无 N 卡，装 CPU 版'}，"
-                           f"体积较大请耐心等候…", "percent": 1})
+    task.emit({"status": f"检测到{'N 卡，装 GPU 版（cu121）' if gpu else '无 N 卡，装 CPU 版'}，"
+                         f"体积较大请耐心等候（断开页面任务也会在后台继续）…",
+               "percent": 1})
     cmd = [py]
     if py == "py":
         cmd.append("-3")
@@ -383,18 +469,22 @@ def _install_mineru_stream():
         assert proc.stdout is not None
         n = 0
         for line in proc.stdout:
+            if task.cancelled:   # 取消按钮才真杀任务（断流不算）
+                proc.kill()
+                task.emit({"done": True, "ok": False,
+                           "detail": "已取消安装；已装部分保留，可重试续装"})
+                return
             line = line.strip()
             if not line:
                 continue
             n += 1
             # pip 无总进度；用行数滑升到 95% 给视觉反馈
-            yield _emit({"status": line[:120],
-                         "percent": min(95, 5 + n * 2)})
+            task.emit({"status": line[:120], "percent": min(95, 5 + n * 2)})
         code = proc.wait()
         if code != 0:
-            yield _emit({"done": True, "ok": False,
-                         "detail": f"pip 退出码 {code}；已装部分保留，可重试。"
-                                   f"若反复失败请按官网说明手动安装"})
+            task.emit({"done": True, "ok": False,
+                       "detail": f"pip 退出码 {code}；已装部分保留，可重试。"
+                                 f"若反复失败请按官网说明手动安装"})
             return
         _post_install("mineru")
         try:
@@ -402,13 +492,20 @@ def _install_mineru_stream():
             ok_probe = True
         except ImportError:
             ok_probe = False
-        yield _emit({"done": True, "ok": True,
-                     "detail": ("MinerU 引擎包已安装" +
-                                ("并热生效" if ok_probe else "，重启软件后生效") +
-                                "；首次解析时模型按官方机制自动下载")})
+        task.emit({"done": True, "ok": True,
+                   "detail": ("MinerU 引擎包已安装" +
+                              ("并热生效" if ok_probe else "，重启软件后生效") +
+                              "；首次解析时模型按官方机制自动下载")})
     finally:
-        if proc.poll() is None:   # 取消/断流：杀掉 pip 子进程
+        if proc.poll() is None and task.cancelled:
             proc.kill()
+
+
+@router.post("/{name}/cancel")
+def cancel_install(name: str):
+    """0.1.8 S3：取消后台安装任务（断流不杀，只有这里才真杀）。"""
+    ok = BgTask.cancel(f"install-{name}")
+    return {"cancelled": ok}
 
 
 @router.post("/{name}/disable")

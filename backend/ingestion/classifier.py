@@ -59,51 +59,66 @@ _CLASSIFY_PROMPT = (
 def extract_json(text: str) -> dict:
     """从 LLM 输出中稳健提取第一个 JSON 对象。"""
     m = re.search(r"\{.*\}", text, re.DOTALL)
-    if not m:
+    if m:
+        try:
+            return json.loads(m.group(0))
+        except json.JSONDecodeError:
+            pass
+    # 0.1.8 S1b：截断容错——输出被 max_tokens 切断时大括号不闭合，
+    # 回退到最后一个完整键值对补 } 再解（只损失末尾轴，不再全军覆没）。
+    m2 = re.search(r"\{.*", text, re.DOTALL)
+    if not m2:
         return {}
-    try:
-        return json.loads(m.group(0))
-    except json.JSONDecodeError:
-        return {}
+    frag = m2.group(0)
+    cut = frag.rfind(",")
+    while cut > 0:
+        try:
+            return json.loads(frag[:cut] + "}")
+        except json.JSONDecodeError:
+            cut = frag.rfind(",", 0, cut)
+    return {}
 
 
 def extract_coordinates(summary: str, router: ModelRouter | None = None,
                         trace_id: str | None = None) -> dict:
     """22 轴意识形态坐标（两段提示词避免漏轴）。
 
-    核心 9 轴解析失败补 0；扩展 13 轴缺失补 0 并记入 low_confidence_axes
-    （随 coordinates 写入 meta.json）。坐标任务走本地优先链（敏感内容）。"""
+    0.1.7 项 2：任一轴解析失败写 null（不再静默补 0——全 0 与「真中性」
+    不可区分），失败轴记入 low_confidence_axes；两段任一落 offline 模板
+    兜底时整次标 extraction="offline"（前端据此提示可稍后重提取）。
+    坐标任务走本地优先链（敏感内容）。"""
     r = router or get_router()
     coords: dict = {}
     low_conf: list[str] = []
 
-    out, _ = r.run("ideology",
-                   [{"role": "user",
-                     "content": _IDEOLOGY_PROMPT.format(summary=summary[:3000])}],
-                   trace_id=trace_id, max_tokens=300, temperature=0.1)
-    data = extract_json(out)
-    for ax in AXES_CORE:
-        try:
-            coords[ax] = max(-5, min(5, int(data.get(ax, 0))))
-        except (TypeError, ValueError):
-            coords[ax] = 0
+    def _fill(data: dict, axes: list[str]) -> None:
+        for ax in axes:
+            v = data.get(ax)
+            try:
+                if v is None:
+                    raise ValueError
+                coords[ax] = max(-5, min(5, int(v)))
+            except (TypeError, ValueError):
+                coords[ax] = None
+                low_conf.append(ax)
 
-    out2, _ = r.run("ideology",
-                    [{"role": "user",
-                      "content": _IDEOLOGY_EXT_PROMPT.format(
-                          summary=summary[:3000])}],
-                    trace_id=trace_id, max_tokens=400, temperature=0.1)
-    data2 = extract_json(out2)
-    for ax in AXES_EXTENDED:
-        v = data2.get(ax)
-        try:
-            if v is None:
-                raise ValueError
-            coords[ax] = max(-5, min(5, int(v)))
-        except (TypeError, ValueError):
-            coords[ax] = 0
-            low_conf.append(ax)
+    out, via = r.run("ideology",
+                     [{"role": "user",
+                       "content": _IDEOLOGY_PROMPT.format(summary=summary[:3000])}],
+                     trace_id=trace_id, max_tokens=900, temperature=0.1)
+    # 0.1.8 S1b：原 300/400 对中文摘要下的 22 轴 JSON 不够，顶满截断致
+    # 解析全败写 null（用户库坐标全 0 的根因，日志 output_tokens=300/400 实锤）
+    _fill(extract_json(out), AXES_CORE)
+
+    out2, via2 = r.run("ideology",
+                       [{"role": "user",
+                         "content": _IDEOLOGY_EXT_PROMPT.format(
+                             summary=summary[:3000])}],
+                       trace_id=trace_id, max_tokens=900, temperature=0.1)
+    _fill(extract_json(out2), AXES_EXTENDED)
     coords["low_confidence_axes"] = low_conf
+    if "offline" in (via, via2):
+        coords["extraction"] = "offline"
     return coords
 
 

@@ -47,6 +47,21 @@ def _read_text_fallback(p: Path) -> str:
     return p.read_text(encoding="utf-8", errors="replace")
 
 
+@router.post("/files/reveal")
+def reveal_dir(kind: str = "skills"):
+    """0.1.8 Q7：用系统资源管理器打开数据目录（白名单限定，防任意路径）。"""
+    import os
+    dirs = {"skills": config.KNOWLEDGE_BASE_PATH / "skills",
+            "fonts": config.KNOWLEDGE_BASE_PATH / "fonts",
+            "root": config.KNOWLEDGE_BASE_PATH}
+    p = dirs.get(kind)
+    if p is None:
+        raise HTTPException(422, f"未知目录 {kind}")
+    p.mkdir(parents=True, exist_ok=True)
+    os.startfile(str(p))  # noqa: S606 本地桌面软件，仅 Windows
+    return {"opened": str(p)}
+
+
 @router.get("/files/{doc_id}")
 def get_file(doc_id: str):
     p = _original(doc_id)

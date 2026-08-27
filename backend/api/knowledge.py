@@ -19,7 +19,54 @@ router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
 @router.get("/docs")
 def list_docs(stance: str | None = None):
     db = get_db()
-    return {"documents": db.list_documents(stance), "stats": db.stats()}
+    return {"documents": db.list_documents(stance), "stats": db.stats(),
+            "pending": len(db.pending_doc_ids())}
+
+
+# ---------- 0.1.8 M2：批量导入待审队列 ----------
+
+@router.post("/docs/{doc_id}/approve")
+def approve_doc(doc_id: str):
+    """单篇通过审核：pending → approved，恢复参与检索/图谱/素材。"""
+    if not get_db().set_review_status(doc_id, "approved"):
+        raise HTTPException(404, f"文档不存在: {doc_id}")
+    return {"doc_id": doc_id, "review_status": "approved"}
+
+
+@router.post("/approve-all")
+def approve_all():
+    """一键清空待审队列。"""
+    n = get_db().approve_all()
+    return {"approved": n}
+
+
+# ---------- 0.1.8 N3：阅读器高亮批注 ----------
+
+class HighlightReq(BaseModel):
+    quote: str = Field(min_length=1, max_length=5000)
+    prefix: str = ""
+    suffix: str = ""
+    color: str = "yellow"
+    note: str = ""
+
+
+@router.get("/docs/{doc_id}/highlights")
+def list_highlights(doc_id: str):
+    return {"highlights": get_db().highlight_list(doc_id)}
+
+
+@router.post("/docs/{doc_id}/highlights")
+def add_highlight(doc_id: str, req: HighlightReq):
+    hl_id = get_db().highlight_add(doc_id, req.quote, req.prefix[-32:],
+                                   req.suffix[:32], req.color, req.note)
+    return {"id": hl_id}
+
+
+@router.delete("/highlights/{hl_id}")
+def del_highlight(hl_id: int):
+    if get_db().highlight_delete(hl_id) == 0:
+        raise HTTPException(404, "高亮不存在")
+    return {"deleted": True}
 
 
 class StanceRequest(BaseModel):
@@ -147,6 +194,14 @@ def patch_metadata(doc_id: str, req: MetadataPatch):
     fields = {k: v for k, v in req.model_dump().items() if v is not None}
     if not fields:
         raise HTTPException(422, "没有要修改的字段")
+    # 0.1.9 D1：年份校验改调共用 sane_year（与导入解析同语义），同时兼容完整日期
+    if "year" in fields:
+        from lib.years import sane_year
+        yi, yr = sane_year(fields["year"])
+        if yi is None:
+            raise HTTPException(422, "年份超出合理范围（-3000 ~ 2600）；区间写法请只填起始年")
+        fields["year"] = yi
+        fields.setdefault("year_raw", yr)   # 前端未传 year_raw 时用归一化原文兜底
     if not get_db().update_document_fields(doc_id, fields):
         raise HTTPException(404, f"文档不存在: {doc_id}")
     return {"doc_id": doc_id, "updated": sorted(fields),
@@ -191,3 +246,102 @@ def search(q: str = Query(min_length=1), stance: str = "empirical",
                        for c in r["chunks"][:top_k]],
             "excluded_docs": r["route"]["excluded"],
             "retrieval_ms": r["retrieval_ms"]}
+
+
+# ---------- 0.1.8 M6：文档合并（分期文章归一档，走 BgTask 断流不中断） ----------
+
+class MergeRequest(BaseModel):
+    doc_ids: list[str] = Field(min_length=2)   # 有序（章节并入顺序）
+    target_id: str = Field(min_length=1)
+
+
+def _merge_worker_factory(doc_ids: list[str], target_id: str):
+    def _worker(task):
+        from api.deps import get_db as _get_db, get_indexer as _get_indexer
+        db = _get_db()
+        vec = _get_indexer().vec
+        c = db.conn
+        sources = [d for d in doc_ids if d != target_id]
+        task.emit({"status": f"开始合并 {len(sources)} 篇到目标文档", "percent": 2})
+        # ① 章节/分块按序并入 target（chapter_num 接尾重排）
+        row = c.execute("SELECT COALESCE(MAX(chapter_num),0) FROM chapters "
+                        "WHERE doc_id=?", (target_id,)).fetchone()
+        offset = int(row[0] or 0)
+        done = 0
+        for src in sources:
+            if task.cancelled:
+                task.emit({"done": True, "ok": False,
+                           "detail": "已取消；已合并部分保留，建议检查库状态"})
+                return
+            n_ch = 0
+            for ch in c.execute("SELECT chapter_id FROM chapters WHERE doc_id=? "
+                                "ORDER BY chapter_num", (src,)).fetchall():
+                n_ch += 1
+                c.execute("UPDATE chapters SET doc_id=?, chapter_num=? "
+                          "WHERE chapter_id=?",
+                          (target_id, offset + n_ch, ch["chapter_id"]))
+            offset += n_ch
+            c.execute("UPDATE chunks SET doc_id=? WHERE doc_id=?",
+                      (target_id, src))
+            c.execute("UPDATE fts_index SET doc_id=? WHERE doc_id=?",
+                      (target_id, src))
+            c.execute("UPDATE arg_units SET doc_id=? WHERE doc_id=?",
+                      (target_id, src))
+            # ② 素材组 document 级引用改指 target（chunk/arg 引用 id 不变仍有效）
+            c.execute("UPDATE OR IGNORE basket SET ref_id=? "
+                      "WHERE item_type='document' AND ref_id=?",
+                      (target_id, src))
+            # 向量库 doc_id 迁移（向量不重算，chunk_id 不变）
+            try:
+                vec.rename_doc(src, target_id)
+            except Exception:
+                pass
+            # ④ 删源 doc 库记录（硬删；子表已迁走，archive 原件全保留）
+            c.execute("DELETE FROM ingestion_progress WHERE doc_id=?", (src,))
+            c.execute("DELETE FROM highlights WHERE doc_id=?", (src,))
+            c.execute("DELETE FROM documents WHERE doc_id=?", (src,))
+            done += 1
+            task.emit({"status": f"已并入 {done}/{len(sources)} 篇",
+                       "percent": 5 + int(done * 60 / len(sources))})
+        c.commit()
+        # ⑤ target 重跑整书摘要（LLM，失败不阻塞）
+        task.emit({"status": "重新生成合并后整书摘要…", "percent": 70})
+        try:
+            from ingestion.summarizer import summarize_document
+            rows = c.execute("SELECT summary FROM chapters WHERE doc_id=? "
+                             "ORDER BY chapter_num", (target_id,)).fetchall()
+            summaries = [r["summary"] for r in rows if r["summary"]]
+            if summaries:
+                new_sum = summarize_document(summaries).strip()
+                if new_sum and not new_sum.startswith("（离线"):
+                    c.execute("UPDATE documents SET summary=? WHERE doc_id=?",
+                              (new_sum, target_id))
+                    c.commit()
+        except Exception as e:  # noqa: BLE001 摘要失败不影响合并主链路
+            task.emit({"status": f"摘要重生成跳过（{e}）", "percent": 85})
+        try:
+            _get_indexer()._update_index()
+        except Exception:
+            pass
+        task.emit({"done": True, "ok": True,
+                   "detail": f"合并完成：{len(sources)} 篇已并入目标文档。"
+                             "坐标可到馆藏点「重新提取坐标」更新；"
+                             "关系边可到图谱点「生成关系」重建"})
+    return _worker
+
+
+@router.post("/merge")
+def merge_docs(req: MergeRequest, last_seq: int = 0):
+    """0.1.8 M6：多文档合并。NDJSON 进度流（BgTask，断流不中断）。"""
+    from fastapi.responses import StreamingResponse
+    from tasks import BgTask
+    db = get_db()
+    if req.target_id not in req.doc_ids:
+        raise HTTPException(422, "target_id 必须在 doc_ids 内")
+    for d in req.doc_ids:
+        if db.get_document(d) is None:
+            raise HTTPException(404, f"文档不存在: {d}")
+    task = BgTask.get_or_start(
+        "merge-docs", _merge_worker_factory(req.doc_ids, req.target_id))
+    return StreamingResponse(task.follow(last_seq),
+                             media_type="application/x-ndjson")

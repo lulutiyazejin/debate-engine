@@ -1,6 +1,6 @@
 // 图谱面板（项目16）：节点=论证单元，边=支持(绿)/攻击(红)/细化(蓝虚)
 // 按立场/文档过滤；「生成关系」调对齐引擎写边；节点右键=编辑/删除（人工纠错）
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ForceGraph2D from "react-force-graph-2d";
 import { api } from "../api";
 import { askConfirm, askInput } from "../components/AppDialog";
@@ -18,6 +18,7 @@ interface Props {
   active: boolean;
   onChain?: (anchor: string) => void;   // 节点右键 → 逻辑链入口（项目14）
   onShowDoc?: (doc: DocRow) => void;    // 批 2/23：combobox 选中项旁「查看」开右栏
+  focusDocId?: string | null;           // 0.1.8 V7：局部图谱入口（文档右键）
 }
 
 // 颜色一律取 token（项目24：主题切换时画布同步换色）
@@ -46,12 +47,25 @@ function edgeColor(rel: string): string {
 }
 
 export default function GraphPanel({ stances, docs, notify, active, onChain,
-                                     onShowDoc }: Props) {
+                                     onShowDoc, focusDocId }: Props) {
   const [stance, setStance] = useState("");
   const [docId, setDocId] = useState("");
+  // 0.1.8 V7：外部「查看此文档关系图」入口 → 同步进 docId 过滤
+  useEffect(() => {
+    if (focusDocId !== undefined && focusDocId !== null && focusDocId !== docId) {
+      setDocId(focusDocId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusDocId]);
   const [relFilter, setRelFilter] = useState<string[]>([]);   // 空=全部
   const [data, setData] = useState<{ nodes: GNode[]; links: GLink[] }>({ nodes: [], links: [] });
   const [building, setBuilding] = useState(false);
+  // 0.1.9 E1：待更新（relations_at IS NULL）文档数，驱动「更新新增（N）」按钮
+  const [pendingN, setPendingN] = useState(0);
+  // 0.1.7 项 4：三态引导——本次会话是否点过生成且落了离线（写边 0 条）
+  const [builtOffline, setBuiltOffline] = useState(false);
+  // 0.1.7 项 4：孤立节点过滤（借 obsidian graph view），视图层显隐保镜头（I8 同款）
+  const [hideIsolated, setHideIsolated] = useState(false);
   const [menu, setMenu] = useState<{ x: number; y: number; node: GNode } | null>(null);
   // 0.1.6 项 6：节点标签常显开关（不悬停也显名），偏好持久化
   const [showLabels, setShowLabels] = useState(
@@ -63,6 +77,28 @@ export default function GraphPanel({ stances, docs, notify, active, onChain,
   const relFilterRef = useRef(relFilter);   // 0.1.5 I8：linkVisibility 读 ref，不换 graphData
   relFilterRef.current = relFilter;
   const lastKey = useRef("");               // 0.1.5 I8 保险：同过滤回切保镜头
+  // 项 4：有边节点集（nodeVisibility 读 ref，不重热引擎）
+  const linkedIds = useMemo(() => {
+    const s = new Set<string>();
+    data.links.forEach((l) => {
+      s.add(typeof l.source === "object" ? l.source.id : l.source);
+      s.add(typeof l.target === "object" ? l.target.id : l.target);
+    });
+    return s;
+  }, [data]);
+  const isolatedCount = data.nodes.length
+    ? data.nodes.filter((n) => !linkedIds.has(n.id)).length : 0;
+  const linkedIdsRef = useRef(linkedIds);
+  linkedIdsRef.current = linkedIds;
+  const hideIsolatedRef = useRef(hideIsolated);
+  hideIsolatedRef.current = hideIsolated;
+
+  // 项 13：外挂字体热应用后 canvas 标签下帧自刷（不重热力导）
+  useEffect(() => {
+    const onFonts = () => fgRef.current?.refresh?.();
+    document.fonts?.addEventListener?.("loadingdone", onFonts);
+    return () => document.fonts?.removeEventListener?.("loadingdone", onFonts);
+  }, []);
 
   const stanceColor = useCallback((s?: string) => {
     const i = stances.findIndex((x) => x.name === s);
@@ -125,20 +161,42 @@ export default function GraphPanel({ stances, docs, notify, active, onChain,
     return () => ro.disconnect();
   }, []);
 
-  const buildRelations = async () => {
+  // 0.1.9 E1：拉取待更新文档数（relations_at IS NULL）
+  const refreshPending = useCallback(async () => {
+    try {
+      const r = await api.get<{ count: number }>("/api/analysis/relations/pending_count");
+      setPendingN(r.count);
+    } catch { /* 忽略：不影响主流程 */ }
+  }, []);
+
+  const buildRelations = async (mode: "incremental" | "full") => {
+    if (mode === "full") {
+      if (!(await askConfirm({ title: "全量重建关系边",
+          body: "将清空全部关系边并对全库论证单元重新配对判定，耗时较长，确定？", danger: true }))) return;
+    }
     setBuilding(true);
     try {
       const r = await api.post<{ pairs_checked: number; relations_written: number }>(
-        "/api/analysis/relations/build", { doc_ids: docId ? [docId] : null });
-      notify(`配对检查 ${r.pairs_checked} 组，写入关系边 ${r.relations_written} 条` +
-        (r.relations_written === 0 ? "（离线模式不下结论，需配置模型 Key）" : ""));
+        "/api/analysis/relations/build", { doc_ids: null, mode });
+      // 项 4：离线写边 0 条 → 明示能力边界（而非留用户猜「为什么没连线」）
+      const offline = r.relations_written === 0;
+      setBuiltOffline(offline);
+      notify(offline
+        ? `配对检查 ${r.pairs_checked} 组，写入 0 条：离线仅否定词规则可判同题对立，配置模型后可判全六种关系`
+        : `配对检查 ${r.pairs_checked} 组，写入关系边 ${r.relations_written} 条`);
       load(true);   // I8：同过滤重拉，保镜头
+      refreshPending();
     } catch (e) {
       notify(`生成关系失败: ${e}`);
     } finally {
       setBuilding(false);
     }
   };
+
+  // 0.1.9 E1：进面 / 文档变动（新导入、重提取）时刷新待更新计数
+  useEffect(() => {
+    if (active) refreshPending();
+  }, [active, docs.length, refreshPending]);
 
   const deleteNode = async (node: GNode) => {
     setMenu(null);
@@ -187,8 +245,15 @@ export default function GraphPanel({ stances, docs, notify, active, onChain,
                                 label: d.title || d.doc_id,
                                 sub: (d.author as string) || undefined }))]} />
         </label>
-        <button className="primary" onClick={buildRelations} disabled={building}>
-          {building ? "对齐判定中…" : "生成/更新关系边"}
+        <button className="primary" onClick={() => buildRelations("incremental")}
+                disabled={building || pendingN === 0}
+                title={pendingN === 0 ? "没有待更新的新增文档（新导入或重提取后会出现）"
+                  : `对 ${pendingN} 篇新增文档 × 全库做增量配对（新旧交叉）`}>
+          {building ? "对齐判定中…" : `更新新增（${pendingN}）`}
+        </button>
+        <button className="link" onClick={() => buildRelations("full")} disabled={building}
+                title="清空全部关系边并对全库重新配对判定（耗时较长）">
+          全量重建
         </button>
         <label className="chk">
           <input type="checkbox" checked={showLabels}
@@ -199,6 +264,15 @@ export default function GraphPanel({ stances, docs, notify, active, onChain,
           {data.nodes.length} 节点 · {data.links.length} 边 · 节点右键可纠错
         </span>
       </div>
+      {/* 0.1.8 V7：局部图谱过滤态提示条（一键清除回全图） */}
+      {docId && (
+        <div className="chip-bar" style={{ paddingTop: 0 }}>
+          <span className="muted small">
+            正在查看：{docs.find((d) => d.doc_id === docId)?.title || docId} 的关系
+          </span>
+          <button className="link" onClick={() => setDocId("")}>清除过滤</button>
+        </div>
+      )}
       {/* 关系 chips 过滤条（项目13）：多选，带计数与 token 色 */}
       <div className="chip-bar">
         {RELATIONS.map((r) => {
@@ -214,15 +288,30 @@ export default function GraphPanel({ stances, docs, notify, active, onChain,
             </button>
           );
         })}
+        {/* 项 4：孤立节点过滤 chip（开=隐藏无边节点） */}
+        <button className={"chip" + (hideIsolated ? " chip-on" : "")}
+                title={`隐藏没有任何关系边的节点（共 ${isolatedCount} 个）`}
+                onClick={() => setHideIsolated((v) => !v)}>
+          孤立节点 {isolatedCount}
+        </button>
         {/* 0.1.5 J10：「全部」复位钮滑移化（常驻占位，120ms 透明度出场） */}
         <button className={"link chip-clear" + (relFilter.length > 0 ? " on" : "")}
                 onClick={() => setRelFilter([])}>全部</button>
       </div>
-      <div ref={hostRef} style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
+      <div ref={hostRef} style={{ flex: 1, minHeight: 0, overflow: "hidden", position: "relative" }}>
+        {/* 项 4：有节点 0 边的两态引导（未点过 vs 点过但离线）；
+            重提取清边后自动重现，闭环引导 */}
+        {data.nodes.length > 0 && data.links.length === 0 && (
+          <div className="graph-hint">
+            {builtOffline
+              ? "离线仅否定词规则可判同题对立，配置模型后可判全六种关系"
+              : "点「更新新增」建立连线"}
+          </div>
+        )}
         {data.nodes.length === 0
           ? <div className="empty-state">
               <p>暂无论证单元</p>
-              <p className="muted small">导入文档后单元自动提取；点「生成/更新关系边」建立连线（离线时可用否定词规则判定同题对立）。</p>
+              <p className="muted small">导入文档后单元自动提取；点「更新新增」建立连线（离线时可用否定词规则判定同题对立）。</p>
             </div>
           : <ForceGraph2D
               ref={fgRef}
@@ -232,6 +321,9 @@ export default function GraphPanel({ stances, docs, notify, active, onChain,
               linkVisibility={(l: GLink) =>
                 relFilterRef.current.length === 0 ||
                 relFilterRef.current.includes(l.relation)}
+              /* 项 4：孤立节点走视图层显隐（同 I8：不换 graphData，保镜头） */
+              nodeVisibility={(n: GNode) =>
+                !hideIsolatedRef.current || linkedIdsRef.current.has(n.id)}
               width={size.w}
               height={size.h}
               cooldownTicks={100}
@@ -253,7 +345,8 @@ export default function GraphPanel({ stances, docs, notify, active, onChain,
                 const txt = n.claim.length > 12 ? n.claim.slice(0, 12) + "…" : n.claim;
                 const fs = Math.max(2.5, 11 / scale);
                 c.save();
-                c.font = `${fs}px "Microsoft YaHei",sans-serif`;
+                // 项 13：字体读 token（--sans），外挂字体对 canvas 标签同样生效
+                c.font = `${fs}px ${cssVar("--sans", '"Microsoft YaHei",sans-serif')}`;
                 c.textAlign = "center"; c.textBaseline = "top";
                 c.lineWidth = fs / 4;
                 c.strokeStyle = cssVar("--canvas-bg", "#16181d");

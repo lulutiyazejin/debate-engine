@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from lib.years import sane_year
 
 
 @dataclass
@@ -60,7 +61,10 @@ def parse_txt(path: Path) -> ParsedDocument:
     raw = path.read_bytes()
     enc = chardet.detect(raw[:32768]).get("encoding") or "utf-8"
     text = raw.decode(enc, errors="replace")
-    return _text_to_doc(text, title=path.stem, source_type="txt")
+    doc = _text_to_doc(text, title=path.stem, source_type="txt")
+    # 0.1.9 D1：txt 无前缀 → year 置空（后续 web enrich 或手动 PATCH 覆盖）
+    doc.year = None
+    return doc
 
 
 def parse_md(path: Path) -> ParsedDocument:
@@ -77,7 +81,11 @@ def parse_md(path: Path) -> ParsedDocument:
     doc = _text_to_doc(text, title=meta.get("title", path.stem),
                        source_type=meta.get("source_type", "md"))
     doc.author = meta.get("author")
-    doc.year = int(meta["year"]) if str(meta.get("year", "")).isdigit() else None
+    # 0.1.9 D1：统一 sane_year() 同时产出 year+year_raw（回显原文）
+    y, yr = sane_year(meta.get("year", ""))
+    doc.year = y
+    # raw_metadata 里保留原始值；year_raw 将在 confirm.py / importer 层转存到 DB
+    doc._year_raw = yr  # internal use by indexer/confirm
     doc.raw_metadata = meta
     return doc
 

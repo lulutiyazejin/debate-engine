@@ -25,6 +25,8 @@ export default function CrossTabView({ docs, stanceLabel, notify, active }: Prop
   const [xtab, setXtab] = useState<XTab | null>(null);
   const [heatDoc, setHeatDoc] = useState("");
   const [heat, setHeat] = useState<Heat | null>(null);
+  // 0.1.8 V4：等宽数字开关（0.1.7 项 10 欠账）
+  const [mono, setMono] = useState(localStorage.getItem("de.viz.mono") !== "0");
 
   const loadXtab = useCallback(async () => {
     try {
@@ -81,13 +83,25 @@ export default function CrossTabView({ docs, stanceLabel, notify, active }: Prop
                         sub: (d.author as string) || undefined }))} />
           </label>
         )}
+        <label className="chk">
+          <input type="checkbox" checked={mono}
+                 onChange={(e) => { setMono(e.target.checked);
+                   localStorage.setItem("de.viz.mono", e.target.checked ? "1" : "0"); }} />
+          等宽数字</label>
+      </div>
+      {/* 0.1.8 V4：每图旁注一行（数据来源+口径） */}
+      <div className="muted small viz-note">
+        {mode === "xtab"
+          ? `数据来源：论证单元坐标按立场 × ${axisLabel(axis)} 区间聚合 · 口径：${
+              metric === "avg" ? "平均坐标（真值 -5..+5）" : "单元计数"}`
+          : "数据来源：单文档章节 × 轴 坐标强度均值 · 口径 0-5"}
       </div>
       <div className="viz-canvas" style={{ overflow: "auto", alignItems: "flex-start" }}>
         {mode === "xtab" && (
           !xtab || xtab.rows.length === 0
             ? <div className="empty-state"><p>暂无交叉数据</p>
                 <p className="muted small">论证单元带坐标后，可按立场 × 轴区间聚合透视。</p></div>
-            : <table className="xtab-table">
+            : <table className={"xtab-table" + (mono ? " mono-nums" : "")}>
                 <thead>
                   <tr>
                     <th>{`立场 ＼ ${axisLabel(axis)}`}</th>
@@ -115,7 +129,7 @@ export default function CrossTabView({ docs, stanceLabel, notify, active }: Prop
                 <p className="muted small">按「章节 × 轴」呈现论证密度（坐标强度均值）。</p></div>
             : !heat || heat.chapters.length === 0
               ? <div className="empty-state"><p>该文档暂无章节/单元坐标</p></div>
-              : <table className="xtab-table heat-table">
+              : <table className={"xtab-table heat-table" + (mono ? " mono-nums" : "")}>
                   <thead>
                     <tr>
                       <th>章节 ＼ 轴</th>

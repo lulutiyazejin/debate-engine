@@ -2,6 +2,7 @@
 // 代理三态 + 联网补充元数据开关 + 连通自测。
 import { useEffect, useState } from "react";
 import { api } from "../../../api";
+import SegmentedSlider from "../../../components/SegmentedSlider";
 
 interface CheckRow { item: string; ok: boolean; detail: string }
 
@@ -61,13 +62,12 @@ export default function NetworkSection({ notify, tick }: Props) {
         作用于全部外发请求（模型 API / 维基百科 / 百度百科）；
         本机地址（127.0.0.1 / localhost 的 Ollama 与引擎自身）始终直连不受影响。
       </p>
-      {([["off", "不使用代理（直连）"], ["system", "跟随系统代理"],
-         ["custom", "自定义地址"]] as const).map(([v, l]) => (
-        <label key={v} className="chk">
-          <input type="radio" name="proxymode" checked={proxy.mode === v}
-                 onChange={() => saveProxy(v)} /> {l}
-        </label>
-      ))}
+      <div className="controls">
+        <SegmentedSlider value={proxy.mode} onChange={saveProxy}
+          options={[{ key: "off", label: "不使用代理（直连）" },
+                    { key: "system", label: "跟随系统代理" },
+                    { key: "custom", label: "自定义地址" }]} />
+      </div>
       {proxy.mode === "custom" && (
         <div className="controls">
           <input className="wide" value={proxyUrl}

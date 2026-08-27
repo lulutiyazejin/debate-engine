@@ -2,6 +2,7 @@
 // 主题三态 / OKLCH 主色 / 窗口记忆 / 手势 / 快捷键。
 import { useState } from "react";
 import { loadKeys } from "../../../App";
+import SegmentedSlider from "../../../components/SegmentedSlider";
 import { setUiPref } from "../../../lib/uiPrefs";
 import { getThemePref, setThemePref, type ThemePref,
          ACCENT_PRESETS, getAccentHue, setAccentHue } from "../../../theme";
@@ -30,12 +31,10 @@ export default function UiSection({ notify }: Props) {
     <>
       <h3>主题</h3>
       <div className="controls">
-        {([["dark", "深色"], ["light", "浅色"], ["system", "跟随系统"]] as const).map(([v, l]) => (
-          <label key={v} className="chk">
-            <input type="radio" name="theme" checked={theme === v}
-                   onChange={() => { setTheme(v); setThemePref(v); }} /> {l}
-          </label>
-        ))}
+        <SegmentedSlider value={theme}
+          onChange={(v) => { setTheme(v as ThemePref); setThemePref(v as ThemePref); }}
+          options={[{ key: "dark", label: "深色" }, { key: "light", label: "浅色" },
+                    { key: "system", label: "跟随系统" }]} />
       </div>
       <p className="muted small">窗口标题栏随主题同步变色；导出的报告 HTML 固定纸感浅色（出版惯例）。</p>
       <h3>主色</h3>

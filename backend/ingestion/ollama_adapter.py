@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import json
 import sys
 import threading
 from pathlib import Path
@@ -27,7 +28,7 @@ def _fetch_json(url: str, timeout: float = 1.0) -> dict | None:
     try:
         r = httpx.get(url, **kw)
         r.raise_for_status()
-        return r.json()
+        return json.loads(r.content)  # 0.1.8 S1：防编码推断乱码
     except Exception:
         return None
 
@@ -365,7 +366,8 @@ def import_gguf(path: str, name: str) -> tuple[bool, str]:
 
 def pull_stream(name: str):
     """流式 pull（B7）：逐行读 Ollama /api/pull 的 NDJSON，产出
-    {status, percent} 进度事件，最后产出 {done, ok, detail} 收尾事件。"""
+    {status, percent, total, completed} 进度事件（0.1.7 项 8：加字节数
+    供前端算「已下/总量・速度」），最后产出 {done, ok, detail} 收尾事件。"""
     import json
 
     import httpx
@@ -397,7 +399,8 @@ def pull_stream(name: str):
                     pct = round(completed / total * 100) if total else None
                     if status == "success":
                         ok = True
-                    yield {"status": status, "percent": pct}
+                    yield {"status": status, "percent": pct,
+                           "total": total, "completed": completed}
                 yield {"done": True, "ok": ok,
                        "detail": (f"模型 {name} 下载完成" if ok
                                   else "下载中断（未收到 success）")}

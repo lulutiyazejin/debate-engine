@@ -4,9 +4,12 @@ import { useEffect, useState } from "react";
 import { api } from "../../../api";
 
 const FIELDS = [
-  { key: "retrieval_top_k", label: "最终引用条数 Top-K", min: 1, max: 20 },
-  { key: "retrieval_top_k_coarse", label: "粗检索每路 Top-K", min: 5, max: 100 },
-  { key: "full_context_token_limit", label: "整书投喂 token 上限", min: 1000, max: 500000 },
+  { key: "retrieval_top_k", label: "最终引用条数 Top-K", min: 1, max: 20, unit: "条",
+    hint: "AI 回答时最多引用几条资料，越大越全但越啰嗦" },
+  { key: "retrieval_top_k_coarse", label: "粗检索每路 Top-K", min: 5, max: 100, unit: "条",
+    hint: "先海选多少条候选再精挑，越大越准但越慢" },
+  { key: "full_context_token_limit", label: "整书投喂 token 上限", min: 1000, max: 500000, unit: "token",
+    hint: "整本书直接喂给模型的长度上限，超出自动改分段" },
 ] as const;
 
 interface Props {
@@ -47,12 +50,15 @@ export default function ParamsSection({ notify, tick }: Props) {
       <h3>生成与检索参数</h3>
       <p className="muted small">写入 settings.json 并立即热生效（跟知识库走，分享包不含）。</p>
       {FIELDS.map((f) => (
-        <div key={f.key} className="param-row">
-          <span>{f.label}</span>
-          <input type="number" min={f.min} max={f.max}
-                 value={params[f.key] ?? ""}
-                 onChange={(e) => setParams({ ...params, [f.key]: Number(e.target.value) })}
-                 onBlur={(e) => onBlur(f, e.target.value)} />
+        <div key={f.key} className="set-row">
+          <div><div>{f.label}</div><div className="muted small">{f.hint}</div></div>
+          <span className="set-ctl">
+            <input type="number" min={f.min} max={f.max}
+                   value={params[f.key] ?? ""}
+                   onChange={(e) => setParams({ ...params, [f.key]: Number(e.target.value) })}
+                   onBlur={(e) => onBlur(f, e.target.value)} />
+            <span className="set-unit">{f.unit}</span>
+          </span>
         </div>
       ))}
     </>

@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import config
-from api.deps import get_indexer
+from api.deps import get_db, get_indexer
 from ingestion.indexer import PENDING, collect_sources
 from ingestion.web_enrich import enrich, enrichment_enabled
 
@@ -115,6 +115,12 @@ def _run_batch(req: BatchRequest) -> None:
                 item["status"], item["detail"] = "skipped", r["skipped"]
             else:
                 item["status"], item["detail"] = "success", r["doc_id"]
+                # 0.1.8 M2：批量入库写 pending 待审（单篇有确认屏，批量进待审队列；
+                # pending 不参与检索/图谱/脉络/回应素材，馆藏灰显+待审徽章）
+                try:
+                    get_db().set_review_status(r["doc_id"], "pending")
+                except Exception:
+                    pass
                 # 0.1.5 H1：批量静默降级，报告逐本标实际落点
                 try:
                     from ingestion.summarizer import summary_window
